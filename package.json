@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:network": "next dev --turbopack --hostname 0.0.0.0",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build --webpack",
     "build:dev": "next build --turbopack",
     "start": "next start",
     "lint": "next lint",
