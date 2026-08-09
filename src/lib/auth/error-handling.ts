@@ -220,7 +220,8 @@ export function logAuthError(
   
   // Log to console in development
   if (process.env.NODE_ENV === 'development') {
-    console.error('Auth Error:', logData);
+    console.error('Auth Error FULL:', error);
+    console.error('Auth Error DETAILS:', logData);
   }
   
   // In production, you might want to send this to a logging service

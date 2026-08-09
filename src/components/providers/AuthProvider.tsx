@@ -106,11 +106,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setAuthState((prev) => ({ ...prev, loading: true, error: null }))
     
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: credentials.email,
         password: credentials.password,
       })
       
+      console.log('========== SUPABASE LOGIN RESULT ==========')
+console.log('User:', data?.user)
+console.log('Session:', data?.session)
+console.log('Error:', error)
+console.log('Error message:', error?.message)
+console.log('Error status:', error?.status)
+console.log('Error code:', error?.code)
+console.log('============================================')
+
       if (error) {
         setAuthState((prev) => ({
           ...prev,
