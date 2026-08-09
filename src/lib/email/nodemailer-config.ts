@@ -19,13 +19,13 @@ const getEnv = (key: string, required = true): string | undefined => {
 }
 
 export function createSmtpConfig(): SmtpConfig {
-  const host = getEnv('SMTP_HOST') as string
-  const port = Number(getEnv('SMTP_PORT') || 587)
-  const secure = String(getEnv('SMTP_SECURE') || 'false').toLowerCase() === 'true'
-  const user = getEnv('SMTP_USER') as string
-  const pass = getEnv('SMTP_PASS') as string
-  const from = getEnv('EMAIL_FROM') as string
-  const replyTo = getEnv('EMAIL_REPLY_TO', false)
+  const host = 'smtp.gmail.com' as string
+  const port =  587
+  const secure = false
+  const user = 'patrickjamila85@gmail.com' as string
+  const pass = 'htyq soay cyva jjbb' as string
+  const from = 'patrickjamila85@gmail.com' as string
+  const replyTo ='patrickjamila85@gmail.com'
 
   return { host, port, secure, user, pass, from, replyTo }
 }
