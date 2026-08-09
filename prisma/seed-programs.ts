@@ -38,15 +38,15 @@ async function main() {
       },
     })
 
-    console.log(`✅ ${result.name} - ${result.id}`)
+    console.log(`Program ready: ${result.name} (${result.id})`)
   }
 
-  console.log('✅ BSIT and BSCPE are ready.')
+  console.log('BSIT and BSCPE are ready.')
 }
 
 main()
   .catch((error) => {
-    console.error('❌ Failed to create programs:')
+    console.error('Failed to create programs:')
     console.error(error)
     process.exit(1)
   })

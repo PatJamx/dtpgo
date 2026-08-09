@@ -5,7 +5,7 @@ export async function GET() {
   try {
     const programs = await prisma.program.findMany({
       where: {
-        isActive: true, // Only return active programs
+        isActive: true,
       },
       select: {
         id: true,
@@ -19,7 +19,16 @@ export async function GET() {
 
     return NextResponse.json(programs, { status: 200 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load programs';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error('Failed to load programs:', error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Failed to load programs';
+
+    return NextResponse.json(
+      { error: message },
+      { status: 500 }
+    );
   }
 }
