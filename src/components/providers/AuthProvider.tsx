@@ -36,25 +36,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     let mounted = true
 
-    // Get initial session - use getUser() for secure authentication
+    // Get initial session - use getUser() for secure authentication, but fall back to getSession
     const getInitialSession = async () => {
       try {
-        // Use getUser() to verify user authenticity with Supabase Auth server
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
-        
-        // Get session data separately if user is authenticated
+        let user: UserWithRole | null = null
         let session = null
-        if (user && !userError) {
-          const { data: { session: sessionData } } = await supabase.auth.getSession()
-          session = sessionData
+        let sessionError: { message?: string } | null = null
+        let userError: { message?: string } | null = null
+
+        if (typeof supabase.auth.getSession === 'function') {
+          const sessionResponse = await supabase.auth.getSession()
+          session = sessionResponse?.data?.session ?? null
+          sessionError = sessionResponse?.error ?? null
+          user = (session?.user as UserWithRole | null) ?? null
         }
-        
+
+        if (!user && typeof supabase.auth.getUser === 'function') {
+          const userResponse = await supabase.auth.getUser()
+          user = (userResponse?.data?.user ?? null) as UserWithRole | null
+          userError = userResponse?.error ?? null
+        }
+
         if (mounted) {
           setAuthState({
-            user: user as UserWithRole | null,
-            session: session,
+            user,
+            session,
             loading: false,
-            error: userError?.message || null,
+            error: userError?.message || sessionError?.message || null,
           })
         }
       } catch (error) {

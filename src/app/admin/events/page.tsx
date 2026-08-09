@@ -12,42 +12,47 @@ export const metadata: Metadata = {
 
 export default function AdminEventsPage() {
   return (
-    <div className="w-full max-w-[2000px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 min-w-[800px]">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Event Management</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Create and manage events, sessions, and organizer assignments
-          </p>
-        </div>
-        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-          <Calendar className="h-4 w-4" />
-          <span>Admin Portal</span>
-        </div>
+  <div className="space-y-6">
+    {/* Header */}
+    <div className="flex items-center justify-between">
+      <div>
+        <h1 className="text-2xl font-bold">Event Management</h1>
+        <p className="text-gray-600">
+          Create and manage events, sessions, and organizer assignments
+        </p>
       </div>
 
-      {/* Quick Stats */}
-      <EventStatsCards />
+      <div className="flex items-center gap-2">
+        <Calendar className="h-5 w-5" />
+        <span>Admin Portal</span>
+      </div>
+    </div>
 
-      {/* Split Pane Management */}
-      <Suspense fallback={
+    {/* Quick Stats */}
+    <EventStatsCards />
+
+    {/* Split Pane Management */}
+    <Suspense
+      fallback={
         <Card>
           <CardHeader>
             <CardTitle>Loading Events...</CardTitle>
-            <CardDescription>Please wait while we load the event management interface.</CardDescription>
+            <CardDescription>
+              Please wait while we load the event management interface.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="animate-pulse space-y-4">
-              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
-              <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded"></div>
-              <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded" />
+              <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded" />
+              <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded" />
             </div>
           </CardContent>
         </Card>
-      }>
-        <EventManagementSplitPane />
-      </Suspense>
-    </div>
-  );
+      }
+    >
+      <EventManagementSplitPane />
+    </Suspense>
+  </div>
+);
 }

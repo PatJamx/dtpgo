@@ -24,6 +24,11 @@ export function EventDetailHeader({
   onMoreActions,
   className,
 }: EventDetailHeaderProps) {
+   const counts = event._count ?? {
+    sessions: 0,
+    attendance: 0,
+    organizerAssignments: 0,
+  };
   const formatDate = (date: string | Date) => {
     return new Date(date).toLocaleDateString('en-US', {
       weekday: 'long',
@@ -72,8 +77,8 @@ export function EventDetailHeader({
               <div className="flex items-center gap-3">
                 <EventStatusBadge
                   isActive={event.isActive}
-                  sessionCount={event._count.sessions}
-                  organizerCount={event._count.organizerAssignments}
+                  sessionCount={counts.sessions}
+                  organizerCount={counts.organizerAssignments}
                   startDate={event.startDate}
                   endDate={event.endDate}
                   variant="detailed"
@@ -126,11 +131,11 @@ export function EventDetailHeader({
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Sessions</p>
                   <div className="space-y-1.5">
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {event._count.sessions} session{event._count.sessions !== 1 ? 's' : ''}
+                      {counts.sessions} session{counts.sessions !== 1 ? 's' : ''}
                     </p>
-                    {event._count.sessions > 0 && (
+                    {counts.sessions > 0 && (
                       <Badge variant="outline" className="text-xs dark:border-gray-600 dark:text-gray-300">
-                        {event._count.attendance} attendance records
+                        {counts.attendance} attendance records
                       </Badge>
                     )}
                   </div>
@@ -145,9 +150,9 @@ export function EventDetailHeader({
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Organizers</p>
                   <div className="space-y-1.5">
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {event._count.organizerAssignments} assigned
+                      {counts.organizerAssignments} assigned
                     </p>
-                    {isCurrentlyActive() && event._count.organizerAssignments > 0 && (
+                    {isCurrentlyActive() && counts.organizerAssignments > 0 && (
                       <Badge variant="default" className="text-xs bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700">
                         Active
                       </Badge>
@@ -197,8 +202,8 @@ export function EventDetailHeader({
             <span className="text-sm text-gray-600 dark:text-gray-400">Status:</span>
             <EventStatusBadge
               isActive={event.isActive}
-              sessionCount={event._count.sessions}
-              organizerCount={event._count.organizerAssignments}
+              sessionCount={counts.sessions}
+              organizerCount={counts.organizerAssignments}
               startDate={event.startDate}
               endDate={event.endDate}
               variant="compact"

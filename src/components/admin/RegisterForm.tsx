@@ -19,8 +19,44 @@ type Program = {
   displayName?: string;
 };
 
+const DEFAULT_PROGRAMS: Program[] = [
+  {
+    id: 'bsit',
+    name: 'BSIT',
+    displayName: 'Bachelor of Science in Information Technology',
+  },
+  {
+    id: 'bscpe',
+    name: 'BSCPE',
+    displayName: 'Bachelor of Science in Computer Engineering',
+  },
+];
+
+const normalizePrograms = (data: unknown): Program[] => {
+  const list = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { programs?: unknown[] } | null)?.programs)
+      ? (data as { programs: unknown[] }).programs
+      : [];
+
+  const normalized: Program[] = [];
+
+  for (const item of list) {
+    const candidate = item as Partial<Program> & { id?: string; name?: string; displayName?: string };
+    if (!candidate?.id || !candidate?.name) continue;
+
+    normalized.push({
+      id: candidate.id,
+      name: candidate.name,
+      displayName: candidate.displayName || candidate.name,
+    });
+  }
+
+  return normalized;
+};
+
 interface RegisterFormProps {
-  onSubmit: (data: StudentFormInput) => Promise<{ studentId?: string } | void>;
+  onSubmit: (data: StudentFormInput) => Promise<{ studentId?: string; id?: string; student?: { id?: string } | null } | void>;
   isSubmitting: boolean;
   initialData?: Partial<StudentFormInput>;
   hideHeader?: boolean;
@@ -46,17 +82,22 @@ export function RegisterForm({ onSubmit, isSubmitting, initialData, hideHeader =
 
   useEffect(() => {
     async function fetchPrograms() {
-      // Only fetch programs if user is authenticated
       if (!user || authLoading) return;
-      
+
       try {
-        const res = await fetch('/api/admin/programs');
-        if (!res.ok) throw new Error('Failed to fetch programs');
+        const res = await fetch('/api/admin/programs', { cache: 'no-store' });
+        if (!res.ok) {
+          setPrograms(DEFAULT_PROGRAMS);
+          return;
+        }
+
         const data = await res.json();
-        setPrograms(data.programs ?? []);
+        const list = normalizePrograms(data);
+        setPrograms(list.length > 0 ? list : DEFAULT_PROGRAMS);
       } catch (error) {
         console.error('Failed to load programs:', error);
-        toast.error('Failed to load programs');
+        setPrograms(DEFAULT_PROGRAMS);
+        toast.error('Could not load programs. Showing default options instead.');
       }
     }
     fetchPrograms();
@@ -121,33 +162,30 @@ export function RegisterForm({ onSubmit, isSubmitting, initialData, hideHeader =
   const handleFormSubmit: SubmitHandler<StudentFormInput> = async (data) => {
     try {
       setRegistrationSuccess(false);
-      // Transform names to uppercase before submission
       const transformedData = {
         ...data,
         firstName: data.firstName.toUpperCase(),
         lastName: data.lastName.toUpperCase(),
       };
-      
+
       const result = await onSubmit(transformedData);
-      
-      console.log('Registration result:', result);
-      console.log('Transformed data:', transformedData);
-      
-      // If onSubmit returns a student ID, show QR code
-      if (result && typeof result === 'object' && result.studentId) {
-        console.log('Using returned student ID:', result.studentId);
-        setRegisteredStudentId(result.studentId);
-        setRegistrationSuccess(true);
-      } else {
-        // Fallback: try to get student ID from the submitted data
-        // This assumes the student ID number can be used as the student ID
-        console.warn('No student ID returned from onSubmit, using student ID number as fallback');
-        console.log('Using fallback student ID:', transformedData.studentIdNumber);
-        setRegisteredStudentId(transformedData.studentIdNumber);
-        setRegistrationSuccess(true);
+
+      const studentId =
+        result && typeof result === 'object'
+          ? result.studentId ?? result.studentId ?? result.id ?? result.student?.id
+          : undefined;
+
+      if (!studentId) {
+        console.warn('No student ID returned by the registration API. Keeping the form in its pre-success state.');
+        setRegisteredStudentId(null);
+        return;
       }
+
+      setRegisteredStudentId(studentId);
+      setRegistrationSuccess(true);
     } catch (error) {
       setRegistrationSuccess(false);
+      setRegisteredStudentId(null);
       console.error('Registration failed:', error);
     }
   };
@@ -217,7 +255,7 @@ export function RegisterForm({ onSubmit, isSubmitting, initialData, hideHeader =
                     <FormControl>
                       <Input 
                         {...field}
-                        type="number"
+                        type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
                         placeholder="Input student ID number"

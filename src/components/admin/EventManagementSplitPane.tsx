@@ -721,10 +721,11 @@ export function EventManagementSplitPane() {
             <DialogDescription>Update event details and configuration.</DialogDescription>
           </DialogHeader>
           {selectedEvent && (
-            <EventForm 
+            <EventForm
+              key={selectedEvent.id}
               event={selectedEvent}
-              onSubmit={handleUpdateEvent} 
-              onCancel={() => setIsEditOpen(false)} 
+              onSubmit={handleUpdateEvent}
+              onCancel={() => setIsEditOpen(false)}
             />
           )}
         </DialogContent>

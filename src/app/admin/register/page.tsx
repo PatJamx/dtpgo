@@ -18,36 +18,56 @@ export default function AdminRegisterPage() {
   const [addAnother, setAddAnother] = useState(true)
   const [formKey, setFormKey] = useState(0) // remount form to reset after success
 
-  async function handleSubmit(data: StudentFormInput): Promise<void> {
-    setIsSubmitting(true)
-    try {
-      const res = await fetch('/api/admin/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
+  async function handleSubmit(
+  data: StudentFormInput
+): Promise<{ studentId?: string }> {
+  setIsSubmitting(true);
 
-      if (!res.ok) {
-        // Provide a helpful message while API is not yet implemented
-        const maybeJson = await res
-          .json()
-          .catch(() => ({ error: 'Registration failed (API not implemented yet)' }))
-        throw new Error(maybeJson.error || 'Registration failed')
-      }
+  try {
+    const res = await fetch('/api/admin/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
 
-      toast.success('Student registered successfully')
+    const responseData = await res.json();
 
-      if (addAnother) {
-        // Remount form to clear fields for another entry
-        setFormKey((k) => k + 1)
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Registration failed'
-      toast.error('Registration Error', { description: message })
-    } finally {
-      setIsSubmitting(false)
+    if (!res.ok) {
+      throw new Error(
+        responseData.error || 'Registration failed'
+      );
     }
+
+    toast.success('Student registered successfully');
+
+    if (addAnother) {
+      setFormKey((k) => k + 1);
+    }
+
+    // IMPORTANT:
+    // Return the database student ID so QRCodeDisplay
+    // can retrieve the correct student.
+    return {
+      studentId: responseData.student.id,
+    };
+
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Registration failed';
+
+    toast.error('Registration Error', {
+      description: message,
+    });
+
+    // Re-throw so RegisterForm knows registration failed
+    throw error;
+
+  } finally {
+    setIsSubmitting(false);
   }
+}
 
   return (
     <>

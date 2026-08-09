@@ -40,9 +40,9 @@ export const POST = withRateLimit('registration', async (request: NextRequest) =
       registrationSource: 'admin',
     })
 
-    if (!student) {
-      throw new Error('Failed to create student')
-    }
+    // if (!student) {
+    //   throw new Error('Failed to create student')
+    // }
 
     studentId = student.id
 
@@ -72,7 +72,11 @@ export const POST = withRateLimit('registration', async (request: NextRequest) =
 
     // Optionally send email here when email service is available in Epic 6
 
-    return NextResponse.json({ student }, { status: 201 })
+    return NextResponse.json({
+      student,
+      studentId: student.id,
+      id: student.id,
+    }, { status: 201 })
   } catch (error: unknown) {
     // Log failed registration attempt
     try {

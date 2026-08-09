@@ -28,6 +28,11 @@ export function EventDetails({ event, onClose }: EventDetailsProps) {
 
   // Attendance data for the Attendance tab
   const { loading: attendanceLoading, kpis: attendanceKpis, rows: attendanceRows, perSessionAggregates } = useAttendance(event.id);
+  const counts = event._count ?? {
+    sessions: sessions.length,
+    organizerAssignments: organizers.length,
+    attendance: 0,
+  };
 
   // Refresh event details
   const fetchEventDetails = useCallback(async () => {
@@ -213,7 +218,7 @@ export function EventDetails({ event, onClose }: EventDetailsProps) {
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-gray-400" />
               <span className="font-medium">Sessions:</span>
-              <span>{event._count.sessions}</span>
+              <span>{counts.sessions}</span>
             </div>
           </div>
         </div>
@@ -419,7 +424,7 @@ export function EventDetails({ event, onClose }: EventDetailsProps) {
                 <CardTitle className="text-sm font-medium">Total Sessions</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{event._count.sessions}</div>
+                <div className="text-2xl font-bold">{counts.sessions}</div>
                 <p className="text-xs text-muted-foreground">
                   {sessions.filter(s => s.isActive).length} active
                 </p>
@@ -431,7 +436,7 @@ export function EventDetails({ event, onClose }: EventDetailsProps) {
                 <CardTitle className="text-sm font-medium">Assigned Organizers</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{event._count.organizerAssignments}</div>
+                <div className="text-2xl font-bold">{counts.organizerAssignments}</div>
                 <p className="text-xs text-muted-foreground">
                   {organizers.length} assigned
                 </p>
@@ -443,7 +448,7 @@ export function EventDetails({ event, onClose }: EventDetailsProps) {
                 <CardTitle className="text-sm font-medium">Total Attendance</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{event._count.attendance}</div>
+                <div className="text-2xl font-bold">{counts.attendance}</div>
                 <p className="text-xs text-muted-foreground">
                   Across all sessions
                 </p>

@@ -89,6 +89,7 @@ export async function GET(request: NextRequest) {
           select: {
             attendance: true,
             sessions: true,
+            organizerAssignments: true,
           },
         },
       },
@@ -252,6 +253,7 @@ export async function POST(request: NextRequest) {
           select: {
             attendance: true,
             sessions: true,
+            organizerAssignments: true,
           },
         },
       },

@@ -36,6 +36,12 @@ export function EventDetailTabs({
   className,
 }: EventDetailTabsProps) {
   const [activeTab, setActiveTab] = useState('sessions');
+
+  const counts = {
+    sessions: event._count?.sessions ?? event.sessions.length,
+    organizerAssignments: event._count?.organizerAssignments ?? event.organizerAssignments.length,
+    attendance: event._count?.attendance ?? 0,
+  };
   
   // Fetch attendance data for the attendance tab
   const { loading, kpis, rows, perSessionAggregates } = useAttendance(event.id);
@@ -117,14 +123,14 @@ export function EventDetailTabs({
             <Clock className="h-4 w-4" />
             Sessions
             <Badge variant="secondary" className="ml-1">
-              {event._count.sessions}
+              {counts.sessions}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value="organizers" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             Organizers
             <Badge variant="secondary" className="ml-1">
-              {event._count.organizerAssignments}
+              {counts.organizerAssignments}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value="attendance" className="flex items-center gap-2">
@@ -301,8 +307,8 @@ export function EventDetailTabs({
                 <Clock className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{event._count.sessions}</div>
-                <p className="text-xs text-muted-foreground">{event._count.sessions === 1 ? 'session' : 'sessions'} created</p>
+                <div className="text-2xl font-bold">{counts.sessions}</div>
+                <p className="text-xs text-muted-foreground">{counts.sessions === 1 ? 'session' : 'sessions'} created</p>
               </CardContent>
             </Card>
             <Card>
@@ -311,8 +317,8 @@ export function EventDetailTabs({
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{event._count.organizerAssignments}</div>
-                <p className="text-xs text-muted-foreground">{event._count.organizerAssignments === 1 ? 'organizer' : 'organizers'} assigned</p>
+                <div className="text-2xl font-bold">{counts.organizerAssignments}</div>
+                <p className="text-xs text-muted-foreground">{counts.organizerAssignments === 1 ? 'organizer' : 'organizers'} assigned</p>
               </CardContent>
             </Card>
             <Card>
@@ -321,8 +327,8 @@ export function EventDetailTabs({
                 <BarChart3 className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{event._count.attendance}</div>
-                <p className="text-xs text-muted-foreground">{event._count.attendance === 1 ? 'record' : 'records'} tracked</p>
+                <div className="text-2xl font-bold">{counts.attendance}</div>
+                <p className="text-xs text-muted-foreground">{counts.attendance === 1 ? 'record' : 'records'} tracked</p>
               </CardContent>
             </Card>
             <Card>
@@ -374,15 +380,15 @@ export function EventDetailTabs({
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-600 dark:text-gray-400">Session Coverage:</span>
-                      <span className="font-medium dark:text-gray-200">{event._count.sessions > 0 ? 'Good' : 'Needs Sessions'}</span>
+                      <span className="font-medium dark:text-gray-200">{counts.sessions > 0 ? 'Good' : 'Needs Sessions'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600 dark:text-gray-400">Organizer Coverage:</span>
-                      <span className="font-medium dark:text-gray-200">{event._count.organizerAssignments > 0 ? 'Good' : 'Needs Organizers'}</span>
+                      <span className="font-medium dark:text-gray-200">{counts.organizerAssignments > 0 ? 'Good' : 'Needs Organizers'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600 dark:text-gray-400">Data Collection:</span>
-                      <span className="font-medium dark:text-gray-200">{event._count.attendance > 0 ? 'Active' : 'No Data'}</span>
+                      <span className="font-medium dark:text-gray-200">{counts.attendance > 0 ? 'Active' : 'No Data'}</span>
                     </div>
                   </div>
                 </div>

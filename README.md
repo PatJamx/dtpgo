@@ -292,4 +292,5 @@ For support and questions:
 
 ---
 
-Built with ❤️ using Next.js 15, TypeScript, and Tailwind CSS
+Built with ❤️ using Next.js 15, TypeScript, and Tailwind CSS#   D T P I G T S - A t t a n d a c e - S y s t e m  
+ 

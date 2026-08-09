@@ -59,15 +59,27 @@ export function EventForm({ event, onSubmit, onCancel }: EventFormProps) {
     reset,
   } = useForm<EventFormData>({
     defaultValues: {
+      name: '',
+      description: undefined,
+      startDate: new Date(),
+      endDate: new Date(Date.now() + 60 * 60 * 1000),
+      location: undefined,
+      isActive: true,
+      organizerIds: [],
+    },
+  });
+
+  useEffect(() => {
+    reset({
       name: event?.name || '',
       description: event?.description || undefined,
       startDate: event?.startDate ? new Date(event.startDate) : new Date(),
-      endDate: event?.endDate ? new Date(event.endDate) : new Date(Date.now() + 60 * 60 * 1000), // 1 hour later
+      endDate: event?.endDate ? new Date(event.endDate) : new Date(Date.now() + 60 * 60 * 1000),
       location: event?.location || undefined,
       isActive: event?.isActive ?? true,
       organizerIds: event?.organizerAssignments?.map(a => a.organizer.id) || [],
-    },
-  });
+    });
+  }, [event, reset]);
 
   // Fetch available organizers
   const fetchOrganizers = async () => {

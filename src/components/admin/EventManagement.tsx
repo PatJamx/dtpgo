@@ -357,79 +357,86 @@ export function EventManagement({ className }: EventManagementProps) {
             </div>
           ) : (
             <div className="space-y-4">
-              {events.map((event) => (
-                <Card key={event.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-semibold text-gray-900">
-                            {event.name}
-                          </h3>
-                          <Badge variant={getStatusBadgeVariant(event.isActive)}>
-                            {event.isActive ? 'Active' : 'Inactive'}
-                          </Badge>
-                        </div>
-                        
-                        {event.description && (
-                          <p className="text-gray-600 mb-3">{event.description}</p>
-                        )}
-                        
-                        <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-4 w-4" />
-                            <span>
-                              {formatDate(event.startDate)} - {formatDate(event.endDate)}
-                            </span>
+              {events.map((event) => {
+                const counts = {
+                  sessions: event._count?.sessions ?? event.sessions?.length ?? 0,
+                  organizerAssignments: event._count?.organizerAssignments ?? event.organizerAssignments?.length ?? 0,
+                };
+
+                return (
+                  <Card key={event.id} className="hover:shadow-md transition-shadow">
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h3 className="text-lg font-semibold text-gray-900">
+                              {event.name}
+                            </h3>
+                            <Badge variant={getStatusBadgeVariant(event.isActive)}>
+                              {event.isActive ? 'Active' : 'Inactive'}
+                            </Badge>
                           </div>
                           
-                          {event.location && (
-                            <div className="flex items-center gap-1">
-                              <MapPin className="h-4 w-4" />
-                              <span>{event.location}</span>
-                            </div>
+                          {event.description && (
+                            <p className="text-gray-600 mb-3">{event.description}</p>
                           )}
                           
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-4 w-4" />
-                            <span>{event._count.sessions} sessions</span>
-                          </div>
-                          
-                          <div className="flex items-center gap-1">
-                            <Users className="h-4 w-4" />
-                            <span>{event._count.organizerAssignments} organizers</span>
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-4 w-4" />
+                              <span>
+                                {formatDate(event.startDate)} - {formatDate(event.endDate)}
+                              </span>
+                            </div>
+                            
+                            {event.location && (
+                              <div className="flex items-center gap-1">
+                                <MapPin className="h-4 w-4" />
+                                <span>{event.location}</span>
+                              </div>
+                            )}
+                            
+                            <div className="flex items-center gap-1">
+                              <Clock className="h-4 w-4" />
+                              <span>{counts.sessions} sessions</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-1">
+                              <Users className="h-4 w-4" />
+                              <span>{counts.organizerAssignments} organizers</span>
+                            </div>
                           </div>
                         </div>
+                        
+                        <div className="flex items-center gap-2 ml-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openDetailsDialog(event)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditDialog(event)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openDeleteDialog(event)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                      
-                      <div className="flex items-center gap-2 ml-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openDetailsDialog(event)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditDialog(event)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openDeleteDialog(event)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
 
@@ -488,6 +495,7 @@ export function EventManagement({ className }: EventManagementProps) {
               </DialogDescription>
             </DialogHeader>
             <EventForm
+              key={selectedEvent.id}
               event={selectedEvent}
               onSubmit={handleUpdateEvent}
               onCancel={() => {

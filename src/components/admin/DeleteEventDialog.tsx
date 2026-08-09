@@ -36,9 +36,15 @@ export function DeleteEventDialog({
     onCancel();
   };
 
+  const counts = event._count ?? {
+    attendance: 0,
+    sessions: 0,
+    organizerAssignments: 0,
+  };
+
   // Check if event has attendance records
-  const hasAttendance = event._count.attendance > 0;
-  const hasSessions = event._count.sessions > 0;
+  const hasAttendance = counts.attendance > 0;
+  const hasSessions = counts.sessions > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -80,7 +86,7 @@ export function DeleteEventDialog({
                 <div>
                   <h5 className="font-medium text-red-800">Attendance Records Found</h5>
                   <p className="text-sm text-red-700 mt-1">
-                    This event has {event._count.attendance} attendance records. 
+                    This event has {counts.attendance} attendance records. 
                     Deleting the event will also delete all attendance data.
                   </p>
                 </div>
@@ -95,7 +101,7 @@ export function DeleteEventDialog({
                 <div>
                   <h5 className="font-medium text-yellow-800">Sessions Found</h5>
                   <p className="text-sm text-yellow-700 mt-1">
-                    This event has {event._count.sessions} sessions. 
+                    This event has {counts.sessions} sessions. 
                     All sessions and their data will be deleted.
                   </p>
                 </div>

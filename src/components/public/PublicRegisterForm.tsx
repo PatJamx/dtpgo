@@ -18,6 +18,39 @@ interface Program {
   displayName: string;
 }
 
+const DEFAULT_PROGRAMS: Program[] = [
+  {
+    id: 'bsit',
+    name: 'BSIT',
+    displayName: 'Bachelor of Science in Information Technology',
+  },
+  {
+    id: 'bscpe',
+    name: 'BSCPE',
+    displayName: 'Bachelor of Science in Computer Engineering',
+  },
+];
+
+const normalizePrograms = (data: unknown): Program[] => {
+  const list = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { programs?: unknown[] } | null)?.programs)
+      ? (data as { programs: unknown[] }).programs
+      : [];
+
+  return list
+    .map((program) => {
+      const candidate = program as Partial<Program> & { id?: string; name?: string; displayName?: string };
+      if (!candidate?.id || !candidate?.name) return null;
+      return {
+        id: candidate.id,
+        name: candidate.name,
+        displayName: candidate.displayName || candidate.name,
+      };
+    })
+    .filter((program): program is Program => Boolean(program));
+};
+
 interface PublicRegisterFormProps {
   onSubmit: (data: StudentFormInput) => Promise<void>;
   isSubmitting: boolean;
@@ -71,18 +104,19 @@ export const PublicRegisterForm = ({ onSubmit, isSubmitting }: PublicRegisterFor
   useEffect(() => {
     const fetchPrograms = async () => {
       try {
-        const response = await fetch('/api/public/programs');
-        if (!response.ok) throw new Error('Failed to load programs');
+        const response = await fetch('/api/public/programs', { cache: 'no-store' });
+        if (!response.ok) {
+          setPrograms(DEFAULT_PROGRAMS);
+          return;
+        }
+
         const data = await response.json();
-        const list: Program[] = Array.isArray(data)
-          ? data
-          : Array.isArray((data as { programs?: Program[] })?.programs)
-          ? (data as { programs: Program[] }).programs
-          : [];
-        setPrograms(list);
+        const list = normalizePrograms(data);
+        setPrograms(list.length > 0 ? list : DEFAULT_PROGRAMS);
       } catch (error) {
         console.error('Failed to load programs:', error);
-        toast.error('Could not load programs. Please try again later.');
+        setPrograms(DEFAULT_PROGRAMS);
+        toast.error('Could not load programs. Showing default options instead.');
       }
     };
     fetchPrograms();

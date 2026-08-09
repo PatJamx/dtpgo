@@ -33,56 +33,57 @@ export async function createStudent(data: {
   year: number;
   programId: string;
   registrationSource?: string;
-}): Promise<StudentWithProgram | null> {
-  try {
-    const student = await prisma.student.create({
-      data: {
-        studentIdNumber: data.studentIdNumber,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email: data.email,
-        year: data.year,
-        programId: data.programId,
-        registrationSource: data.registrationSource || 'admin',
-      },
-      include: {
-        program: {
-          select: {
-            id: true,
-            name: true,
-            displayName: true,
-          },
+}): Promise<StudentWithProgram> {
+  const student = await prisma.student.create({
+    data: {
+      studentIdNumber: data.studentIdNumber,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      year: data.year,
+      programId: data.programId,
+      registrationSource: data.registrationSource || 'admin',
+    },
+    include: {
+      program: {
+        select: {
+          id: true,
+          name: true,
+          displayName: true,
         },
       },
-    });
+    },
+  });
 
-    return {
-      id: student.id,
-      studentIdNumber: student.studentIdNumber,
-      firstName: student.firstName,
-      lastName: student.lastName,
-      email: student.email,
-      year: student.year,
-      programId: student.programId,
-      registrationSource: student.registrationSource,
-      createdAt: student.createdAt,
-      updatedAt: student.updatedAt,
-      program: student.program,
-    };
-
-  } catch (error) {
-    console.error('Error creating student:', error);
-    return null;
-  }
+  return {
+    id: student.id,
+    studentIdNumber: student.studentIdNumber,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    email: student.email,
+    year: student.year,
+    programId: student.programId,
+    registrationSource: student.registrationSource,
+    createdAt: student.createdAt,
+    updatedAt: student.updatedAt,
+    program: student.program,
+  };
 }
 
 /**
  * Get student by ID (original function for existing codebase)
  */
-export async function getStudentById(id: string): Promise<StudentWithProgram | null> {
+export async function getStudentById(
+  id: string
+): Promise<StudentWithProgram | null> {
   try {
-    const student = await prisma.student.findUnique({
-      where: { id },
+    const student = await prisma.student.findFirst({
+      where: {
+        OR: [
+          { id: id },
+          { studentIdNumber: id },
+        ],
+      },
       include: {
         program: {
           select: {
@@ -111,7 +112,6 @@ export async function getStudentById(id: string): Promise<StudentWithProgram | n
       updatedAt: student.updatedAt,
       program: student.program,
     };
-
   } catch (error) {
     console.error('Error getting student by ID:', error);
     return null;

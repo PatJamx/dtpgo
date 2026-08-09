@@ -36,7 +36,7 @@ describe('Attendance export parity', () => {
       pageSize: '50',
     })
     const apiReq = new NextRequest(apiUrl)
-    const apiRes = await getApi(apiReq, { params: { id: EVENT_ID } })
+    const apiRes = await getApi(apiReq, { params: Promise.resolve({ id: EVENT_ID }) })
     const apiJson = await apiRes.json()
     expect(apiRes.status).toBe(200)
     expect(apiJson.success).toBe(true)
@@ -45,7 +45,7 @@ describe('Attendance export parity', () => {
     // Call CSV export (unpaginated)
     const exportUrl = buildUrl(`/api/admin/events/${EVENT_ID}/attendance/export`, query)
     const expReq = new NextRequest(exportUrl)
-    const expRes = await getExport(expReq, { params: { id: EVENT_ID } })
+    const expRes = await getExport(expReq, { params: Promise.resolve({ id: EVENT_ID }) })
     expect(expRes.status).toBe(200)
     const csvText = await (expRes as Response).text()
     const lines = csvText.trim().split('\n')

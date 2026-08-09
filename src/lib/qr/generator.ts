@@ -9,7 +9,10 @@ interface QROptions {
   };
 }
 
-export async function generateQRCodeDataURL(text: string, options: QROptions = {}): Promise<string> {
+export async function generateQRCodeDataURL(
+  text: string,
+  options: QROptions = {}
+): Promise<string> {
   try {
     const defaultOptions = {
       width: 300,
@@ -26,4 +29,4 @@ export async function generateQRCodeDataURL(text: string, options: QROptions = {
     console.error('Error generating QR code:', err);
     throw new Error('Failed to generate QR code.');
   }
-} 
+}

@@ -5,6 +5,12 @@ import { NextRequest, NextResponse } from 'next/server'
 /**
  * Creates a Supabase client for use in server components
  */
+type SupabaseCookie = {
+  name: string
+  value: string
+  options?: Record<string, unknown>
+}
+
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies()
 
@@ -16,7 +22,7 @@ export async function createSupabaseServerClient() {
         getAll() {
           return cookieStore.getAll()
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: SupabaseCookie[]) {
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, options)
@@ -50,7 +56,7 @@ export function createSupabaseMiddlewareClient(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: SupabaseCookie[]) {
           cookiesToSet.forEach(({ name, value, options }) => {
             request.cookies.set(name, value)
             response.cookies.set(name, value, options)
