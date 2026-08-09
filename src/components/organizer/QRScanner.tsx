@@ -1,858 +1,1285 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
-import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { Camera, X, CheckCircle, User, Hash, Zap, Scan, Sparkles, AlertCircle } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+
+import {
+  Html5Qrcode,
+  Html5QrcodeSupportedFormats,
+} from 'html5-qrcode';
+
+import {
+  Camera,
+  CheckCircle,
+  AlertCircle,
+  Scan,
+  X,
+  Upload,
+} from 'lucide-react';
+
 import { toast } from 'sonner';
 
-interface QRScannerProps {
-  sessionId: string;
-  eventId: string;
-  onScan: (qrData: string, updateResult: (data: Partial<ScanResult>) => void) => Promise<void>;
-  onError?: (error: string) => void;
-  onCleanup?: () => void;
-  onScanningStateChange?: (isScanning: boolean) => void;
-}
-
 interface ScanResult {
-  studentId: string;
-  studentIdNumber: string;
-  firstName: string;
-  lastName: string;
-  timestamp: string;
+  firstName?: string;
+  lastName?: string;
+  studentIdNumber?: string;
+  scanType?: string;
   isDuplicate?: boolean;
   isError?: boolean;
   errorMessage?: string;
+  timestamp: Date;
 }
 
-export function QRScanner({ onScan, onError, onCleanup, onScanningStateChange }: QRScannerProps) {
-  const [isScanning, setIsScanning] = useState(false);
-  const [cameraId, setCameraId] = useState<string | null>(null);
-  const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [scanAnimation, setScanAnimation] = useState(false);
-  const [showResultDialog, setShowResultDialog] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
+interface QRScannerProps {
+  onScan: (
+    qrData: string,
+    updateResult: (data: Partial<ScanResult>) => void
+  ) => Promise<void>;
+
+  onError?: (error: string) => void;
+
+  onCleanup?: () => void;
+
+  onScanningStateChange?: (
+    isScanning: boolean
+  ) => void;
+}
+
+export function QRScanner({
+  onScan,
+  onError,
+  onCleanup,
+  onScanningStateChange,
+}: QRScannerProps) {
+  /*
+   * --------------------------------------------------
+   * Refs
+   * --------------------------------------------------
+   */
+
   const scannerRef = useRef<Html5Qrcode | null>(null);
+
+  const fileInputRef =
+    useRef<HTMLInputElement | null>(null);
+
   const isMountedRef = useRef(true);
-  const lastScanTimeRef = useRef<number>(0);
-  const successAudioRef = useRef<HTMLAudioElement | null>(null);
-  const dialogTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isCleaningUpRef = useRef(false);
 
-  // Initialize success sound
-  useEffect(() => {
-    successAudioRef.current = new Audio();
-    successAudioRef.current.src = 'data:audio/wav;base64,UklGRhIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==';
-    successAudioRef.current.volume = 0.3;
+  const processingRef = useRef(false);
 
-    return () => {
-      if (successAudioRef.current) {
-        successAudioRef.current = null;
+  const lastDecodedValueRef =
+    useRef<string>('');
+
+  const lastDecodedAtRef =
+    useRef<number>(0);
+
+  /*
+   * --------------------------------------------------
+   * State
+   * --------------------------------------------------
+   */
+
+  const [isScanning, setIsScanning] =
+    useState(false);
+
+  const [cameraId, setCameraId] =
+    useState<string | null>(null);
+
+  const [cameraError, setCameraError] =
+    useState<string | null>(null);
+
+  const [isProcessing, setIsProcessing] =
+    useState(false);
+
+  const [scanAnimation, setScanAnimation] =
+    useState(false);
+
+  const [lastScanResult, setLastScanResult] =
+    useState<ScanResult | null>(null);
+
+  /*
+   * --------------------------------------------------
+   * Update scanning state
+   * --------------------------------------------------
+   */
+
+  const updateScanningState = useCallback(
+    (value: boolean) => {
+      if (!isMountedRef.current) {
+        return;
       }
-    };
-  }, []);
 
-  // Detect device type for camera mirroring
-  useEffect(() => {
-    const detectDevice = () => {
-      const userAgent = navigator.userAgent.toLowerCase();
-      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent) ||
-                            (window.innerWidth <= 768) ||
-                            ('ontouchstart' in window);
-      setIsMobile(isMobileDevice);
-    };
+      setIsScanning(value);
 
-    detectDevice();
-    
-    // Re-detect on resize
-    const handleResize = () => detectDevice();
-    window.addEventListener('resize', handleResize);
-    
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+      onScanningStateChange?.(value);
+    },
+    [onScanningStateChange]
+  );
 
-  // Initialize scanner
+  /*
+   * --------------------------------------------------
+   * Update scan result
+   * --------------------------------------------------
+   */
+
+  const updateScanResult = useCallback(
+    (data: Partial<ScanResult>) => {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setLastScanResult((previous) => ({
+        timestamp:
+          previous?.timestamp ?? new Date(),
+        ...previous,
+        ...data,
+      }));
+    },
+    []
+  );
+
+  /*
+   * --------------------------------------------------
+   * Select best camera
+   * --------------------------------------------------
+   */
+
+  const selectBestCamera = useCallback(
+    (
+      cameras: Array<{
+        id: string;
+        label: string;
+      }>
+    ) => {
+      if (!cameras.length) {
+        return null;
+      }
+
+      /*
+       * Prefer rear/environment camera.
+       */
+      const rearCamera = cameras.find(
+        (camera) => {
+          const label =
+            camera.label.toLowerCase();
+
+          return (
+            label.includes('back') ||
+            label.includes('rear') ||
+            label.includes('environment')
+          );
+        }
+      );
+
+      return rearCamera ?? cameras[0];
+    },
+    []
+  );
+
+  /*
+   * --------------------------------------------------
+   * Load available cameras
+   * --------------------------------------------------
+   */
+
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Get available cameras
-    Html5Qrcode.getCameras().then(cameras => {
-      if (cameras && cameras.length > 0) {
-        // Prefer back camera
-        const backCamera = cameras.find(cam => 
-          cam.label.toLowerCase().includes('back') || 
-          cam.label.toLowerCase().includes('rear') ||
-          cam.label.toLowerCase().includes('environment')
+    const loadCameras = async () => {
+      try {
+        const cameras =
+          await Html5Qrcode.getCameras();
+
+        if (!cameras || cameras.length === 0) {
+          throw new Error(
+            'No camera was found on this device.'
+          );
+        }
+
+        const selectedCamera =
+          selectBestCamera(cameras);
+
+        if (!selectedCamera) {
+          throw new Error(
+            'No usable camera was found.'
+          );
+        }
+
+        if (isMountedRef.current) {
+          setCameraId(selectedCamera.id);
+          setCameraError(null);
+        }
+      } catch (error) {
+        console.error(
+          'Failed to get cameras:',
+          error
         );
-        setCameraId(backCamera?.id || cameras[0].id);
-        console.log('📷 Found cameras:', cameras.length, 'Using:', backCamera?.label || cameras[0].label);
+
+        if (isMountedRef.current) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Unable to access camera.';
+
+          setCameraError(message);
+        }
       }
-    }).catch(err => {
-      console.error('Error getting cameras:', err);
-    });
+    };
+
+    loadCameras();
 
     return () => {
       isMountedRef.current = false;
     };
-  }, []);
+  }, [selectBestCamera]);
 
-  // Reset scanner state when component mounts (for mode switching)
-  useEffect(() => {
-    // Reset all scanner-related state when component mounts
-    setIsScanning(false);
-    setIsProcessing(false);
-    setScanAnimation(false);
-    setShowResultDialog(false);
-    setLastScanResult(null);
-    setIsStopping(false);
-    lastScanTimeRef.current = 0;
-    
-    // Clear any existing scanner instance
-    if (scannerRef.current) {
+  /*
+   * --------------------------------------------------
+   * Extract student ID from QR data
+   * --------------------------------------------------
+   *
+   * New QR format:
+   *
+   *     202412345
+   *
+   * Older JSON format:
+   *
+   *     {
+   *       "studentId": "202412345"
+   *     }
+   *
+   * We support both.
+   */
+
+  const extractStudentId = useCallback(
+    (decodedText: string): string => {
+      const value =
+        decodedText.trim();
+
+      if (!value) {
+        throw new Error(
+          'The QR code is empty.'
+        );
+      }
+
+      /*
+       * First try JSON.
+       */
       try {
-        scannerRef.current.clear();
-      } catch (err) {
-        console.warn('Error clearing scanner on mount:', err);
+        const parsed: unknown =
+          JSON.parse(value);
+
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          'studentId' in parsed
+        ) {
+          const studentId =
+            (parsed as {
+              studentId?: unknown;
+            }).studentId;
+
+          if (
+            typeof studentId === 'string' &&
+            studentId.trim()
+          ) {
+            return studentId.trim();
+          }
+
+          if (
+            typeof studentId === 'number'
+          ) {
+            return String(studentId);
+          }
+        }
+      } catch {
+        /*
+         * Not JSON.
+         *
+         * That's okay.
+         */
       }
+
+      /*
+       * Support URLs containing studentId.
+       *
+       * Example:
+       *
+       * /scan?studentId=123456
+       */
+      try {
+        if (
+          value.startsWith('http://') ||
+          value.startsWith('https://')
+        ) {
+          const url =
+            new URL(value);
+
+          const studentId =
+            url.searchParams.get(
+              'studentId'
+            );
+
+          if (studentId?.trim()) {
+            return studentId.trim();
+          }
+
+          const id =
+            url.searchParams.get('id');
+
+          if (id?.trim()) {
+            return id.trim();
+          }
+        }
+      } catch {
+        /*
+         * Not a URL.
+         */
+      }
+
+      /*
+       * New QR format:
+       *
+       * plain student ID.
+       */
+      return value;
+    },
+    []
+  );
+
+  /*
+   * --------------------------------------------------
+   * Handle decoded QR
+   * --------------------------------------------------
+   */
+
+  const handleDecodedText = useCallback(
+    async (decodedText: string) => {
+      const value =
+        decodedText.trim();
+
+      if (!value) {
+        return;
+      }
+
+      /*
+       * Prevent duplicate processing when the
+       * same QR remains in front of the camera.
+       */
+      const now = Date.now();
+
+      if (
+        value === lastDecodedValueRef.current &&
+        now - lastDecodedAtRef.current < 3000
+      ) {
+        return;
+      }
+
+      /*
+       * Prevent concurrent API requests.
+       */
+      if (processingRef.current) {
+        return;
+      }
+
+      lastDecodedValueRef.current = value;
+      lastDecodedAtRef.current = now;
+
+      processingRef.current = true;
+
+      if (!isMountedRef.current) {
+        processingRef.current = false;
+        return;
+      }
+
+      setIsProcessing(true);
+      setScanAnimation(true);
+
+      setLastScanResult({
+        timestamp: new Date(),
+        isError: false,
+        isDuplicate: false,
+      });
+
+      try {
+        console.log(
+          '[QR] Raw decoded value:',
+          value
+        );
+
+        /*
+         * Extract the actual student ID.
+         */
+        const studentId =
+          extractStudentId(value);
+
+        console.log(
+          '[QR] Extracted student ID:',
+          studentId
+        );
+
+        if (!studentId) {
+          throw new Error(
+            'The QR code does not contain a student ID.'
+          );
+        }
+
+        /*
+         * Send the student ID to the parent.
+         */
+        await onScan(
+          studentId,
+          updateScanResult
+        );
+
+        console.log(
+          '[QR] Attendance processing completed.'
+        );
+
+        if (isMountedRef.current) {
+          setLastScanResult(
+            (previous) => ({
+              timestamp:
+                previous?.timestamp ??
+                new Date(),
+              ...previous,
+            })
+          );
+        }
+      } catch (error) {
+        console.error(
+          '[QR] Processing error:',
+          error
+        );
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Failed to process QR code.';
+
+        if (isMountedRef.current) {
+          setLastScanResult({
+            timestamp: new Date(),
+            isError: true,
+            isDuplicate: false,
+            errorMessage: message,
+          });
+
+          toast.error(
+            'QR Scan Failed',
+            {
+              description: message,
+            }
+          );
+        }
+
+        onError?.(message);
+      } finally {
+        processingRef.current =
+          false;
+
+        if (isMountedRef.current) {
+          setIsProcessing(false);
+
+          window.setTimeout(() => {
+            if (isMountedRef.current) {
+              setScanAnimation(false);
+            }
+          }, 500);
+        }
+      }
+    },
+    [
+      extractStudentId,
+      onError,
+      onScan,
+      updateScanResult,
+    ]
+  );
+
+  /*
+   * --------------------------------------------------
+   * Stop existing scanner
+   * --------------------------------------------------
+   */
+
+  const destroyScanner =
+    useCallback(async () => {
+      const scanner =
+        scannerRef.current;
+
+      if (!scanner) {
+        return;
+      }
+
+      try {
+        await scanner.stop();
+      } catch (error) {
+        console.warn(
+          '[QR] Scanner stop warning:',
+          error
+        );
+      }
+
+      try {
+        scanner.clear();
+      } catch (error) {
+        console.warn(
+          '[QR] Scanner clear warning:',
+          error
+        );
+      }
+
       scannerRef.current = null;
-    }
-    
-    console.log('🔄 QR Scanner component mounted - state reset');
+    }, []);
+
+  /*
+   * --------------------------------------------------
+   * Start scanner with selected camera
+   * --------------------------------------------------
+   */
+
+  const startScannerWithCamera =
+    useCallback(
+      async (
+        selectedCameraId: string
+      ) => {
+        /*
+         * Destroy previous scanner first.
+         */
+        await destroyScanner();
+
+        /*
+         * Clear old result.
+         */
+        if (isMountedRef.current) {
+          setCameraError(null);
+        }
+
+        /*
+         * Create new scanner.
+         */
+        const scanner =
+          new Html5Qrcode(
+            'qr-reader',
+            {
+              verbose: false,
+            }
+          );
+
+        scannerRef.current =
+          scanner;
+
+        console.log(
+          '[QR] Starting camera:',
+          selectedCameraId
+        );
+
+        /*
+         * Start camera.
+         */
+        await scanner.start(
+          selectedCameraId,
+          {
+            fps: 10,
+
+            /*
+             * A 280x280 scanning area works well
+             * for QR codes on phones and monitors.
+             */
+            qrbox: {
+              width: 280,
+              height: 280,
+            },
+
+            aspectRatio: 1.0,
+
+            /*
+             * ONLY scan QR codes.
+             */
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.QR_CODE,
+            ],
+
+            /*
+             * Allow mirrored cameras to work.
+             */
+            disableFlip: false,
+          },
+
+          /*
+           * SUCCESS CALLBACK
+           */
+          async (decodedText) => {
+            await handleDecodedText(
+              decodedText
+            );
+          },
+
+          /*
+           * FRAME ERROR CALLBACK
+           *
+           * IMPORTANT:
+           *
+           * "No MultiFormat Readers..."
+           * is NOT a camera failure.
+           *
+           * It simply means that particular
+           * video frame did not contain a readable QR.
+           */
+          (errorMessage) => {
+            if (
+              errorMessage?.includes(
+                'No MultiFormat Readers were able to detect the code'
+              )
+            ) {
+              return;
+            }
+
+            if (
+              errorMessage?.includes(
+                'QR code parse error'
+              )
+            ) {
+              return;
+            }
+
+            console.debug(
+              '[QR] Frame scan:',
+              errorMessage
+            );
+          }
+        );
+
+        if (isMountedRef.current) {
+          updateScanningState(true);
+        }
+
+        console.log(
+          '[QR] Scanner started successfully.'
+        );
+      },
+      [
+        destroyScanner,
+        handleDecodedText,
+        updateScanningState,
+      ]
+    );
+
+  /*
+   * --------------------------------------------------
+   * Start scanner
+   * --------------------------------------------------
+   */
+
+  const startScanning =
+    useCallback(async () => {
+      if (isScanning) {
+        return;
+      }
+
+      try {
+        setCameraError(null);
+
+        let selectedCameraId =
+          cameraId;
+
+        /*
+         * If we don't already know the camera,
+         * request camera list.
+         */
+        if (!selectedCameraId) {
+          const cameras =
+            await Html5Qrcode.getCameras();
+
+          if (
+            !cameras ||
+            cameras.length === 0
+          ) {
+            throw new Error(
+              'No camera was found on this device.'
+            );
+          }
+
+          const selectedCamera =
+            selectBestCamera(cameras);
+
+          if (!selectedCamera) {
+            throw new Error(
+              'No usable camera was found.'
+            );
+          }
+
+          selectedCameraId =
+            selectedCamera.id;
+
+          if (isMountedRef.current) {
+            setCameraId(
+              selectedCameraId
+            );
+          }
+        }
+
+        await startScannerWithCamera(
+          selectedCameraId
+        );
+      } catch (error) {
+        console.error(
+          '[QR] Failed to start scanner:',
+          error
+        );
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Failed to start camera.';
+
+        if (isMountedRef.current) {
+          setCameraError(message);
+        }
+
+        updateScanningState(false);
+
+        toast.error(
+          'Unable to start scanner',
+          {
+            description: message,
+          }
+        );
+
+        onError?.(message);
+      }
+    }, [
+      cameraId,
+      isScanning,
+      onError,
+      selectBestCamera,
+      startScannerWithCamera,
+      updateScanningState,
+    ]);
+
+  /*
+   * --------------------------------------------------
+   * Stop scanner
+   * --------------------------------------------------
+   */
+
+  const stopScanning =
+    useCallback(async () => {
+      try {
+        await destroyScanner();
+      } finally {
+        processingRef.current =
+          false;
+
+        if (isMountedRef.current) {
+          updateScanningState(false);
+          setIsProcessing(false);
+          setScanAnimation(false);
+        }
+
+        onCleanup?.();
+      }
+    }, [
+      destroyScanner,
+      onCleanup,
+      updateScanningState,
+    ]);
+
+  /*
+   * --------------------------------------------------
+   * Scan QR from image
+   * --------------------------------------------------
+   */
+
+  const handleFileSelected =
+    useCallback(
+      async (
+        event: React.ChangeEvent<HTMLInputElement>
+      ) => {
+        const file =
+          event.target.files?.[0];
+
+        if (!file) {
+          return;
+        }
+
+        try {
+          setIsProcessing(true);
+          setCameraError(null);
+
+          /*
+           * Stop live camera first.
+           */
+          await destroyScanner();
+
+          /*
+           * Create temporary scanner for image.
+           */
+          const imageScanner =
+            new Html5Qrcode(
+              'qr-reader',
+              {
+                verbose: false,
+              }
+            );
+
+          scannerRef.current =
+            imageScanner;
+
+          console.log(
+            '[QR] Reading image:',
+            file.name
+          );
+
+          const decodedText =
+            await imageScanner.scanFile(
+              file,
+              true
+            );
+
+          console.log(
+            '[QR] Image decoded:',
+            decodedText
+          );
+
+          /*
+           * Process exactly like a camera QR.
+           */
+          await handleDecodedText(
+            decodedText
+          );
+
+          /*
+           * Image scanner is no longer
+           * needed.
+           */
+          try {
+            imageScanner.clear();
+          } catch {
+            // Ignore.
+          }
+
+          scannerRef.current = null;
+        } catch (error) {
+          console.error(
+            '[QR] Image scan failed:',
+            error
+          );
+
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Could not read the QR image.';
+
+          toast.error(
+            'QR image could not be read',
+            {
+              description:
+                'Make sure the entire QR code is visible, sharp, and not cropped.',
+            }
+          );
+
+          onError?.(message);
+
+          try {
+            scannerRef.current?.clear();
+          } catch {
+            // Ignore.
+          }
+
+          scannerRef.current = null;
+        } finally {
+          if (
+            fileInputRef.current
+          ) {
+            fileInputRef.current.value =
+              '';
+          }
+
+          if (
+            isMountedRef.current
+          ) {
+            setIsProcessing(false);
+          }
+        }
+      },
+      [
+        destroyScanner,
+        handleDecodedText,
+        onError,
+      ]
+    );
+
+  /*
+   * --------------------------------------------------
+   * Component cleanup
+   * --------------------------------------------------
+   */
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current =
+        false;
+
+      processingRef.current =
+        false;
+
+      const scanner =
+        scannerRef.current;
+
+      scannerRef.current = null;
+
+      if (scanner) {
+        scanner
+          .stop()
+          .catch(() => {})
+          .finally(() => {
+            try {
+              scanner.clear();
+            } catch {
+              // Ignore.
+            }
+          });
+      }
+    };
   }, []);
 
-  const startScanning = useCallback(async () => {
-    if (!cameraId) {
-      toast.error('No camera available');
-      return;
-    }
+  /*
+   * --------------------------------------------------
+   * Optional global cleanup
+   * --------------------------------------------------
+   */
 
-    try {
-      // Create scanner instance if not exists
-      if (!scannerRef.current) {
-        scannerRef.current = new Html5Qrcode('qr-reader');
-      }
-
-      console.log('🎬 Starting QR scanner...');
-
-      await scannerRef.current.start(
-        cameraId,
-        {
-          fps: 10,
-          qrbox: function(viewfinderWidth, viewfinderHeight) {
-            console.log('📐 Viewfinder dimensions:', { viewfinderWidth, viewfinderHeight, isMobile });
-            
-            if (isMobile) {
-              // Mobile: Optimize for mobile screen sizes
-              const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-              const maxEdge = Math.max(viewfinderWidth, viewfinderHeight);
-              
-              // Use different sizing based on screen orientation and size
-              let qrboxSize;
-              if (maxEdge > minEdge * 1.5) {
-                // Landscape orientation - use smaller percentage
-                qrboxSize = Math.floor(minEdge * 0.6);
-              } else {
-                // Portrait orientation - use larger percentage
-                qrboxSize = Math.floor(minEdge * 0.75);
-              }
-              
-              // Ensure minimum size for usability
-              qrboxSize = Math.max(qrboxSize, 200);
-              
-              console.log('📱 Mobile qrbox size:', qrboxSize, 'orientation:', maxEdge > minEdge * 1.5 ? 'landscape' : 'portrait');
-              return {
-                width: qrboxSize,
-                height: qrboxSize
-              };
-            } else {
-              // Desktop: Create a much larger scanning area to reduce zoom effect
-              const maxWidth = Math.min(viewfinderWidth * 0.8, 600);
-              const maxHeight = Math.min(viewfinderHeight * 0.8, 800);
-              
-              // Use 1:1 aspect ratio (square) for better QR scanning
-              const scanningAspectRatio = 1.0;
-              let width = maxWidth;
-              let height = width / scanningAspectRatio;
-              
-              // If height exceeds max, adjust
-              if (height > maxHeight) {
-                height = maxHeight;
-                width = height * scanningAspectRatio;
-              }
-              
-              const result = {
-                width: Math.floor(width),
-                height: Math.floor(height)
-              };
-              
-              console.log('🖥️ Desktop qrbox result:', result);
-              console.log('🖥️ Desktop viewfinder usage:', {
-                widthUsage: `${Math.floor((result.width / viewfinderWidth) * 100)}%`,
-                heightUsage: `${Math.floor((result.height / viewfinderHeight) * 100)}%`
-              });
-              
-              return result;
-            }
-          },
-          aspectRatio: isMobile ? 1.0 : 1.0, // Square for both, but mobile gets different video constraints
-          videoConstraints: isMobile ? {
-            // Mobile camera constraints - optimized for mobile devices
-            width: { ideal: 640, max: 1280 },
-            height: { ideal: 480, max: 720 },
-            facingMode: "environment" // Use back camera on mobile
-          } : {
-            // Desktop camera constraints to reduce zoom
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            // No facingMode for desktop
-          },
-        },
-        async (decodedText) => {
-          // Debounce scans
-          const now = Date.now();
-          if (now - lastScanTimeRef.current < 2000) {
-            console.log('⏳ Debouncing scan...');
-            return;
-          }
-          lastScanTimeRef.current = now;
-
-          console.log('✅ QR Code detected:', decodedText);
-          setScanAnimation(true);
-          setIsProcessing(true);
-
-          setTimeout(() => setScanAnimation(false), 1000);
-
-          try {
-            let studentData: {
-              studentId: string;
-              studentIdNumber?: string;
-              firstName?: string;
-              lastName?: string;
-            };
-
-            // Parse QR data
-            try {
-              const parsed = JSON.parse(decodedText);
-              studentData = parsed;
-            } catch {
-              console.log('📝 Plain text QR code detected, treating as student ID:', decodedText);
-              studentData = {
-                studentId: decodedText.trim(),
-                studentIdNumber: decodedText.trim(),
-              };
-            }
-
-              // Call the onScan callback first (this does the database validation)
-              try {
-                let finalResult: Partial<ScanResult> | null = null;
-                
-                // Show processing state
-            setLastScanResult({
-              studentId: studentData.studentId,
-              studentIdNumber: studentData.studentIdNumber || studentData.studentId,
-                  firstName: 'Processing',
-                  lastName: '...',
-              timestamp: new Date().toISOString()
-            });
-            setShowResultDialog(true);
-                
-                // Wait for API response
-                await onScan(decodedText, (updatedData) => {
-                  finalResult = updatedData;
-                });
-                console.log('✅ onScan callback completed successfully');
-                
-                // Now update with the final result
-                if (finalResult) {
-                  const fr = finalResult as Partial<ScanResult>;
-                  const completed: ScanResult = {
-                    studentId: fr.studentId ?? studentData.studentId,
-                    studentIdNumber: fr.studentIdNumber ?? (studentData.studentIdNumber || studentData.studentId),
-                    firstName: fr.firstName ?? 'Student',
-                    lastName: fr.lastName ?? '',
-                    timestamp: new Date().toISOString(),
-                    isDuplicate: fr.isDuplicate,
-                    isError: fr.isError,
-                    errorMessage: fr.errorMessage,
-                  };
-                  if (completed.isDuplicate) {
-                    console.log('🟡 Duplicate scan detected - showing yellow dialog');
-                    console.log('🔍 Using finalResult data:', completed);
-                    // Show duplicate dialog (yellow/orange) using the data from API response
-                    setLastScanResult({ ...completed, isDuplicate: true });
-                  } else {
-                    console.log('🟢 Success scan - showing green dialog');
-                    console.log('🔍 Using finalResult data for success:', completed);
-                    // Show success dialog (green) using the data from API response
-                    setLastScanResult(completed);
-                  }
-                }
-            
-            // Auto-dismiss dialog after 3 seconds
-            if (dialogTimerRef.current) {
-              clearTimeout(dialogTimerRef.current);
-            }
-            dialogTimerRef.current = setTimeout(() => {
-              setShowResultDialog(false);
-            }, 3000);
-
-              // Play success sound
-              if (successAudioRef.current) {
-                successAudioRef.current.currentTime = 0;
-                successAudioRef.current.play().catch(err => console.warn('Could not play sound:', err));
-              }
-              
-            } catch (callbackErr) {
-              console.error('❌ Error in onScan callback:', callbackErr);
-              
-              // Show error dialog instead of success
-              setLastScanResult({
-                studentId: studentData.studentId,
-                studentIdNumber: studentData.studentIdNumber || studentData.studentId,
-                firstName: 'Error',
-                lastName: '',
-                timestamp: new Date().toISOString(),
-                isError: true,
-                errorMessage: callbackErr instanceof Error ? callbackErr.message : 'Failed to record attendance'
-              });
-              
-              // Show error dialog
-              setShowResultDialog(true);
-              
-              // Auto-dismiss error dialog after 4 seconds (longer for errors)
-              if (dialogTimerRef.current) {
-                clearTimeout(dialogTimerRef.current);
-              }
-              dialogTimerRef.current = setTimeout(() => {
-                setShowResultDialog(false);
-              }, 4000);
-              
-              toast.error('Recording Failed', {
-                description: callbackErr instanceof Error ? callbackErr.message : 'Failed to record attendance'
-              });
-            }
-
-          } catch (err) {
-            console.error('❌ Error processing QR data:', err);
-            toast.error('Scan Error', {
-              description: err instanceof Error ? err.message : 'Failed to process QR code'
-            });
-          } finally {
-            setIsProcessing(false);
-            console.log('🔄 Processing state reset to false');
-          }
-        },
-        (errorMessage) => {
-          if (!errorMessage.includes('NotFoundException')) {
-            console.warn('Scanner error:', errorMessage);
-          }
-        }
-      );
-
-      setIsScanning(true);
-      onScanningStateChange?.(true);
-      console.log('✅ Scanner started successfully');
-    } catch (err) {
-      console.error('Error starting scanner:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Failed to start scanner';
-      toast.error(errorMsg);
-      onError?.(errorMsg);
-    }
-  }, [cameraId, onScan, onError, onScanningStateChange]);
-
-  const stopScanning = useCallback(async () => {
-    console.log('🛑 Stop scanner called, isScanning:', isScanning, 'scannerRef exists:', !!scannerRef.current);
-    
-    setIsStopping(true);
-    
-    if (!scannerRef.current) {
-      console.log('⚠️ No scanner instance to stop');
-      setIsScanning(false);
-      onScanningStateChange?.(false);
-      setIsStopping(false);
-      return;
-    }
-
-    try {
-      // Always try to stop the scanner, regardless of isScanning state
-      await scannerRef.current.stop();
-      console.log('✅ Scanner stopped successfully');
-    } catch (err) {
-      console.error('❌ Error stopping scanner:', err);
-      // Even if stop fails, we should still update the state
-    } finally {
-      // Always update state to ensure UI reflects the change
-      setIsScanning(false);
-      onScanningStateChange?.(false);
-      setIsStopping(false);
-      console.log('🔄 Scanner state updated to stopped');
-    }
-  }, [isScanning, onScanningStateChange]);
-
-  // Expose cleanup function to parent component
-  const cleanup = useCallback(async () => {
-    // Prevent multiple cleanup calls
-    if (isCleaningUpRef.current) {
-      console.log('🧹 Cleanup already in progress, skipping...');
-      return;
-    }
-    
-    isCleaningUpRef.current = true;
-    console.log('🧹 Cleaning up QR scanner...');
-    
-    try {
-      // Clear any pending timers
-      if (dialogTimerRef.current) {
-        clearTimeout(dialogTimerRef.current);
-        dialogTimerRef.current = null;
-      }
-      
-      // Stop scanner if running - this is critical to avoid the "Cannot clear while scan is ongoing" error
-      if (scannerRef.current) {
-        try {
-          // Check if scanner is actually running before trying to stop it
-          if (isScanning) {
-            await scannerRef.current.stop();
-            console.log('🛑 Scanner stopped during cleanup');
-          }
-          
-          // Now clear the scanner instance
-          scannerRef.current.clear();
-          console.log('🧹 Scanner cleared');
-        } catch (err) {
-          console.error('Error during scanner cleanup:', err);
-          // Even if there's an error, we should still try to clear
-          try {
-            if (scannerRef.current) {
-              scannerRef.current.clear();
-            }
-          } catch (clearErr) {
-            console.error('Error clearing scanner after stop failure:', clearErr);
-          }
-        } finally {
-          scannerRef.current = null;
-        }
-      }
-      
-      // Reset state
-      setIsScanning(false);
-      setIsProcessing(false);
-      setScanAnimation(false);
-      setShowResultDialog(false);
-      setLastScanResult(null);
-      
-      // Notify parent component
-      onScanningStateChange?.(false);
-      onCleanup?.();
-      
-      console.log('✅ QR scanner cleanup completed');
-    } finally {
-      isCleaningUpRef.current = false;
-    }
-  }, [isScanning, onCleanup, onScanningStateChange]);
-
-  // Expose cleanup function to parent via ref
   useEffect(() => {
-    // Store cleanup function in a way that parent can access it
-    (window as unknown as { __qrScannerCleanup?: () => Promise<void> }).__qrScannerCleanup = cleanup;
-    
-    return () => {
-      delete (window as unknown as { __qrScannerCleanup?: () => Promise<void> }).__qrScannerCleanup;
-    };
-  }, [cleanup]);
+    const cleanup =
+      async () => {
+        await stopScanning();
+      };
 
-  // Cleanup on unmount
-  useEffect(() => {
+    const windowWithCleanup =
+      window as Window & {
+        __qrScannerCleanup?: () => Promise<void>;
+      };
+
+    windowWithCleanup.__qrScannerCleanup =
+      cleanup;
+
     return () => {
-      // Use a more robust cleanup approach for unmount
-      if (scannerRef.current) {
-        try {
-          // Try to stop first if scanning
-          if (isScanning) {
-            scannerRef.current.stop().catch(() => {
-              // Ignore stop errors during unmount
-            });
-          }
-          // Always try to clear
-          scannerRef.current.clear();
-        } catch (err) {
-          // Ignore cleanup errors during unmount
-          console.warn('Cleanup error during unmount (ignored):', err);
-        } finally {
-          scannerRef.current = null;
-        }
-      }
-      
-      // Clear timers
-      if (dialogTimerRef.current) {
-        clearTimeout(dialogTimerRef.current);
-      }
+      delete windowWithCleanup.__qrScannerCleanup;
     };
-  }, [isScanning]);
+  }, [stopScanning]);
+
+  /*
+   * --------------------------------------------------
+   * Render
+   * --------------------------------------------------
+   */
 
   return (
     <div className="space-y-4">
-      {/* Success Result Dialog - Celebratory Popup */}
-      <Dialog open={showResultDialog} onOpenChange={setShowResultDialog}>
-        <DialogContent className="sm:max-w-md border-0 bg-transparent shadow-none p-0" showCloseButton={false}>
-          {/* Screen reader only title for accessibility */}
-          <DialogTitle className="sr-only">
-            {lastScanResult?.isError 
-              ? 'Error Scan Result' 
-              : lastScanResult?.isDuplicate 
-                ? 'Duplicate Scan Result' 
-                : 'Successful Scan Result'}
-          </DialogTitle>
-          
-          <div className={`relative overflow-hidden rounded-3xl backdrop-blur-xl border-2 ${
-            lastScanResult?.isError
-              ? 'bg-gradient-to-br from-red-500/30 to-red-600/30 border-red-500/50'
-              : lastScanResult?.isDuplicate 
-              ? 'bg-gradient-to-br from-amber-500/30 to-orange-500/30 border-amber-500/50' 
-              : 'bg-gradient-to-br from-emerald-500/30 to-green-500/30 border-emerald-500/50'
-          } shadow-2xl ${
-            lastScanResult?.isError 
-              ? 'shadow-red-500/30' 
-              : lastScanResult?.isDuplicate 
-                ? 'shadow-amber-500/30' 
-                : 'shadow-emerald-500/30'
-          } animate-in zoom-in-95 duration-300`}>
-            
-            {/* Animated background sparkles */}
-            <div className="absolute inset-0 overflow-hidden">
-              <div className={`absolute top-0 left-1/4 w-2 h-2 ${
-                lastScanResult?.isError 
-                  ? 'bg-red-400' 
-                  : lastScanResult?.isDuplicate 
-                    ? 'bg-amber-400' 
-                    : 'bg-emerald-400'
-              } rounded-full animate-ping`}></div>
-              <div className={`absolute top-1/4 right-1/4 w-1 h-1 ${
-                lastScanResult?.isError 
-                  ? 'bg-red-500' 
-                  : lastScanResult?.isDuplicate 
-                    ? 'bg-orange-400' 
-                    : 'bg-green-400'
-              } rounded-full animate-ping delay-75`}></div>
-              <div className={`absolute bottom-1/4 left-1/3 w-1.5 h-1.5 ${
-                lastScanResult?.isError 
-                  ? 'bg-red-300' 
-                  : lastScanResult?.isDuplicate 
-                    ? 'bg-amber-300' 
-                    : 'bg-emerald-300'
-              } rounded-full animate-ping delay-150`}></div>
+
+      {/* -------------------------------------------- */}
+      {/* Scanner */}
+      {/* -------------------------------------------- */}
+
+      <div
+        className={[
+          'relative overflow-hidden rounded-2xl',
+          'border border-gray-200 dark:border-gray-700',
+          'bg-black',
+          'shadow-xl',
+          scanAnimation
+            ? 'ring-4 ring-green-400/50'
+            : '',
+        ].join(' ')}
+      >
+
+        <div
+          id="qr-reader"
+          className="w-full min-h-[360px]"
+        />
+
+        {/* Ready overlay */}
+        {!isScanning && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950/95 text-white p-6 text-center">
+
+            <div className="mb-4 rounded-full bg-yellow-400/10 p-5">
+              <Scan className="h-10 w-10 text-yellow-400" />
             </div>
 
-            <div className="relative p-8 text-center space-y-6">
-              {/* Icon with glow */}
-              <div className="relative inline-block">
-                <div className={`absolute inset-0 ${
-                  lastScanResult?.isError 
-                    ? 'bg-red-500' 
-                    : lastScanResult?.isDuplicate 
-                      ? 'bg-amber-500' 
-                      : 'bg-emerald-500'
-                } rounded-full blur-2xl opacity-50 animate-pulse`}></div>
-                <div className={`relative p-6 rounded-full ${
-                  lastScanResult?.isError 
-                    ? 'bg-gradient-to-br from-red-500 to-red-600' 
-                    : lastScanResult?.isDuplicate 
-                    ? 'bg-gradient-to-br from-amber-500 to-orange-500' 
-                    : 'bg-gradient-to-br from-emerald-500 to-green-500'
-                }`}>
-                  {lastScanResult?.isError ? (
-                    <X className="h-16 w-16 text-white" />
-                  ) : lastScanResult?.isDuplicate ? (
-                    <Zap className="h-16 w-16 text-white" />
-                  ) : (
-                    <CheckCircle className="h-16 w-16 text-white" />
-                  )}
-                </div>
-              </div>
+            <h3 className="text-xl font-bold">
+              Ready to Scan
+            </h3>
 
-              {/* Title */}
-              <div>
-                <h2 className={`text-3xl font-bold mb-2 ${
-                  lastScanResult?.isError 
-                    ? 'text-red-100' 
-                    : lastScanResult?.isDuplicate 
-                      ? 'text-amber-100' 
-                      : 'text-emerald-100'
-                }`}>
-                  {lastScanResult?.isError 
-                    ? 'Error!' 
-                    : lastScanResult?.isDuplicate 
-                      ? 'Already Recorded!' 
-                      : 'Success!'}
-                </h2>
-                {lastScanResult?.isError ? (
-                  <div className="flex items-center justify-center gap-2 text-red-200/80">
-                    <AlertCircle className="h-4 w-4" />
-                    <span className="text-sm">Scan Failed</span>
-                    <AlertCircle className="h-4 w-4" />
-                  </div>
-                ) : !lastScanResult?.isDuplicate && (
-                  <div className="flex items-center justify-center gap-2 text-emerald-200/80">
-                    <Sparkles className="h-4 w-4" />
-                    <span className="text-sm">Attendance Recorded</span>
-                    <Sparkles className="h-4 w-4" />
-                  </div>
-                )}
-              </div>
+            <p className="mt-2 max-w-md text-sm text-gray-300">
+              Start the scanner and place
+              the student's QR code inside
+              the scanning frame.
+            </p>
 
-              {/* Student Info */}
-              <div className="space-y-3">
-                {lastScanResult?.isError ? (
-                  <div className="flex items-center justify-center gap-3 text-white">
-                    <AlertCircle className="h-6 w-6 text-white/80" />
-                    <span className="font-bold text-2xl">
-                      {lastScanResult?.errorMessage || 'Scan Error'}
-                    </span>
-                  </div>
-                ) : (
-                  <>
-                <div className="flex items-center justify-center gap-3 text-white">
-                  <User className="h-6 w-6 text-white/80" />
-                  <span className="font-bold text-2xl">
-                    {lastScanResult?.firstName} {lastScanResult?.lastName}
-                  </span>
-                </div>
-                
-                <div className="flex items-center justify-center gap-3 text-white/90">
-                  <Hash className="h-5 w-5 text-white/70" />
-                  <span className="font-mono text-xl">
-                    {lastScanResult?.studentIdNumber}
-                  </span>
-                </div>
-                  </>
-                )}
-              </div>
-
-              {/* Timestamp */}
-              <div className={`text-sm ${
-                lastScanResult?.isError 
-                  ? 'text-red-200/60' 
-                  : lastScanResult?.isDuplicate 
-                    ? 'text-amber-200/60' 
-                    : 'text-emerald-200/60'
-              }`}>
-                {lastScanResult?.isError 
-                  ? `Error occurred at ${lastScanResult ? new Date(lastScanResult.timestamp).toLocaleTimeString() : ''}`
-                  : lastScanResult?.isDuplicate 
-                  ? `Previously scanned at ${lastScanResult ? new Date(lastScanResult.timestamp).toLocaleTimeString() : ''}`
-                  : `Scanned at ${lastScanResult ? new Date(lastScanResult.timestamp).toLocaleTimeString() : ''}`
-                }
-              </div>
-
-              {/* Auto-dismiss indicator with tap-to-close hint */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-center gap-2 text-white/40 text-xs">
-                  <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-pulse"></div>
-                  <span>Auto-closing in 3 seconds</span>
-                </div>
-                <button
-                  onClick={() => setShowResultDialog(false)}
-                  className="text-white/30 hover:text-white/60 text-xs underline transition-colors"
-                >
-                  Tap to close now
-                </button>
-              </div>
-            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        )}
 
-      {/* Modern Scanner Styles */}
-      <style jsx global>{`
-        #qr-reader video {
-          ${!isMobile ? 'transform: scaleX(-1) !important;' : ''}
-          ${!isMobile ? '-webkit-transform: scaleX(-1) !important;' : ''}
-          border-radius: 1rem;
-          object-fit: cover;
-        }
-        
-        #qr-reader__dashboard_section_swaplink {
-          display: none !important;
-        }
-        
-        /* Clean scanner without shaded region */
-        #qr-shaded-region {
-          display: none !important;
-        }
-      `}</style>
+        {/* Scanning guide */}
+        {isScanning && (
+          <div className="pointer-events-none absolute inset-0">
 
-      {/* Processing Indicator - Animated */}
-      {isProcessing && (
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-yellow-500/20 to-amber-500/20 dark:from-yellow-900/20 dark:to-amber-900/20 border-2 border-yellow-500/40 dark:border-yellow-900/40">
-          <div className="absolute inset-0 bg-gradient-to-r from-yellow-500/10 via-amber-500/10 to-yellow-500/10 dark:from-yellow-900/10 dark:via-amber-900/10 dark:to-yellow-900/10 animate-pulse"></div>
-          <Alert className="border-0 bg-transparent relative">
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <div className="absolute inset-0 bg-yellow-500 dark:bg-yellow-600 rounded-full blur-lg opacity-50 animate-ping"></div>
-                <Scan className="h-6 w-6 text-yellow-600 dark:text-yellow-400 relative animate-spin" />
-              </div>
-              <AlertDescription className="text-yellow-800 dark:text-yellow-300 font-medium text-base">
-                Processing QR code...
-              </AlertDescription>
+            <div className="absolute left-1/2 top-1/2 h-[280px] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.18)]" />
+
+            <div
+              className="absolute left-1/2 top-1/2 h-0.5 w-[260px] -translate-x-1/2 bg-yellow-400 shadow-lg"
+              style={{
+                animation:
+                  'qr-scan-line 2s ease-in-out infinite',
+              }}
+            />
+
+          </div>
+        )}
+
+      </div>
+
+      {/* -------------------------------------------- */}
+      {/* Camera error */}
+      {/* -------------------------------------------- */}
+
+      {cameraError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+
+          <div className="flex gap-3">
+
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+
+            <div>
+
+              <p className="font-semibold">
+                Camera unavailable
+              </p>
+
+              <p className="mt-1 text-sm">
+                {cameraError}
+              </p>
+
+              <p className="mt-2 text-xs opacity-80">
+                You can also use "Scan Image"
+                to test a QR code image.
+              </p>
+
             </div>
-          </Alert>
+
+          </div>
+
         </div>
       )}
 
-      {/* Scanner Container - Premium Look */}
-      <div className="relative group">
+      {/* -------------------------------------------- */}
+      {/* Last scan result */}
+      {/* -------------------------------------------- */}
+
+      {lastScanResult && (
         <div
-          id="qr-reader"
-          className={`rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 ${
-            isScanning ? 'shadow-yellow-500/50 ring-2 ring-yellow-500/30' : ''
-          } ${scanAnimation ? 'scale-[1.02]' : 'scale-100'} ${
-            !isMobile ? 'bg-gray-50 dark:bg-gray-800' : ''
-          } ${isMobile ? 'w-full' : ''}`}
-          style={{ 
-            minHeight: isMobile ? '250px' : '300px',
-            maxHeight: isMobile ? '400px' : '400px',
-            width: isMobile ? '100%' : '400px',
-            maxWidth: isMobile ? '100%' : '400px',
-            margin: '0 auto',
-            aspectRatio: isMobile ? '1/1' : '1/1'
-          }}
-        />
-        {!isScanning && (
-          <div className={`absolute inset-0 flex items-center justify-center rounded-2xl backdrop-blur-sm ${
-            isMobile 
-              ? 'bg-gradient-to-br from-gray-900/95 via-gray-900/95 to-gray-900/95 dark:from-gray-950/95 dark:via-gray-950/95 dark:to-gray-950/95'
-              : 'bg-gradient-to-br from-gray-800/90 via-gray-700/90 to-gray-800/90 dark:from-gray-900/90 dark:via-gray-800/90 dark:to-gray-900/90'
-          }`}>
-            <div className="text-center px-4">
-              <div className="relative inline-block mb-8">
-                <div className={`absolute inset-0 rounded-full blur-2xl opacity-50 animate-pulse ${
-                  isMobile 
-                    ? 'bg-gradient-to-r from-yellow-500 to-amber-500 dark:from-yellow-600 dark:to-amber-600'
-                    : 'bg-gradient-to-r from-yellow-400 to-amber-400 dark:from-yellow-500 dark:to-amber-500'
-                }`}></div>
-                <div className={`relative rounded-full p-6 shadow-2xl ${
-                  isMobile 
-                    ? 'bg-gradient-to-r from-yellow-500 to-amber-500 dark:from-yellow-600 dark:to-amber-600'
-                    : 'bg-gradient-to-r from-yellow-400 to-amber-400 dark:from-yellow-500 dark:to-amber-500'
-                }`}>
-                  <Camera className="h-12 w-12 text-white" />
-                </div>
-              </div>
-              <h2 className={`text-xl font-bold mb-2 ${
-                isMobile 
-                  ? 'text-gray-100 dark:text-gray-100' 
-                  : 'text-gray-50 dark:text-gray-50'
-              }`}>Ready to Scan</h2>
-              <p className={`text-sm ${
-                isMobile 
-                  ? 'text-gray-400 dark:text-gray-400' 
-                  : 'text-gray-300 dark:text-gray-300'
-              }`}>
-                {isMobile 
-                  ? 'Position QR code within the frame' 
-                  : 'Position mobile phone screen within the scanning area'
-                }
+          className={[
+            'rounded-xl border p-4',
+            lastScanResult.isError
+              ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30'
+              : lastScanResult.isDuplicate
+                ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950/30'
+                : 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30',
+          ].join(' ')}
+        >
+
+          <div className="flex items-start gap-3">
+
+            {lastScanResult.isError ? (
+              <AlertCircle className="h-6 w-6 text-red-600" />
+            ) : lastScanResult.isDuplicate ? (
+              <AlertCircle className="h-6 w-6 text-yellow-600" />
+            ) : (
+              <CheckCircle className="h-6 w-6 text-green-600" />
+            )}
+
+            <div className="min-w-0 flex-1">
+
+              <p className="font-semibold">
+
+                {lastScanResult.isError
+                  ? 'Scan Failed'
+                  : lastScanResult.isDuplicate
+                    ? 'Duplicate Scan'
+                    : 'Scan Successful'}
+
               </p>
-              <p className={`text-xs mt-1 ${
-                isMobile 
-                  ? 'text-gray-500 dark:text-gray-500' 
-                  : 'text-gray-400 dark:text-gray-400'
-              }`}>Click start to begin scanning</p>
+
+              {lastScanResult.errorMessage && (
+                <p className="mt-1 text-sm">
+                  {lastScanResult.errorMessage}
+                </p>
+              )}
+
+              {lastScanResult.firstName && (
+                <p className="mt-1 text-lg font-bold">
+                  {lastScanResult.firstName}{' '}
+                  {lastScanResult.lastName}
+                </p>
+              )}
+
+              {lastScanResult.studentIdNumber && (
+                <p className="text-sm opacity-75">
+                  Student ID:{' '}
+                  {lastScanResult.studentIdNumber}
+                </p>
+              )}
+
+              {lastScanResult.scanType && (
+                <p className="text-sm opacity-75">
+                  Scan type:{' '}
+                  {lastScanResult.scanType}
+                </p>
+              )}
+
             </div>
+
           </div>
+
+        </div>
+      )}
+
+      {/* -------------------------------------------- */}
+      {/* Buttons */}
+      {/* -------------------------------------------- */}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+
+        {!isScanning ? (
+          <button
+            type="button"
+            onClick={startScanning}
+            disabled={isProcessing}
+            className="flex h-12 items-center justify-center gap-2 rounded-xl bg-yellow-400 px-4 font-semibold text-black transition hover:bg-yellow-500 disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-2"
+          >
+            <Camera className="h-5 w-5" />
+
+            Start Scanner
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={stopScanning}
+            disabled={isProcessing}
+            className="flex h-12 items-center justify-center gap-2 rounded-xl bg-red-500 px-4 font-semibold text-white transition hover:bg-red-600 disabled:opacity-50 sm:col-span-2"
+          >
+            <X className="h-5 w-5" />
+
+            Stop Scanner
+          </button>
         )}
-        
-        {/* Scanning Tips - Elegant */}
-        {isScanning && !lastScanResult && !isProcessing && (
-          <div className="mt-4 p-4 rounded-xl bg-muted border border-border backdrop-blur-sm">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
-                <Camera className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-semibold text-foreground mb-2">
-                  {isMobile ? 'Scanning Tips' : 'Mobile Phone Scanning Tips'}
-                </h4>
-                <ul className="text-xs text-muted-foreground space-y-2">
-                  {isMobile ? (
-                    <>
-                      <li className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 bg-yellow-500 dark:bg-yellow-400 rounded-full"></span>
-                        Position QR code within the highlighted frame
-                      </li>
-                      <li className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 bg-yellow-500 dark:bg-yellow-400 rounded-full"></span>
-                        Hold steady for 1-2 seconds
-                      </li>
-                      <li className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 bg-yellow-500 dark:bg-yellow-400 rounded-full"></span>
-                        Ensure good lighting for better scanning
-                      </li>
-                    </>
-                  ) : (
-                    <>
-                      <li className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 bg-yellow-500 dark:bg-yellow-400 rounded-full"></span>
-                        Position the mobile phone screen within the scanning frame
-                      </li>
-                      <li className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 bg-yellow-500 dark:bg-yellow-400 rounded-full"></span>
-                        Hold the phone steady and ensure QR code is clearly visible
-                      </li>
-                      <li className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 bg-yellow-500 dark:bg-yellow-400 rounded-full"></span>
-                        Adjust phone brightness if needed for better scanning
-                      </li>
-                      <li className="flex items-center gap-3">
-                        <span className="w-1.5 h-1.5 bg-yellow-500 dark:bg-yellow-400 rounded-full"></span>
-                        The scanning area is optimized for mobile phone screens
-                      </li>
-                    </>
-                  )}
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
+
+        <button
+          type="button"
+          onClick={() =>
+            fileInputRef.current?.click()
+          }
+          disabled={isProcessing}
+          className="flex h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 font-semibold text-gray-800 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700"
+        >
+          <Upload className="h-5 w-5" />
+
+          Scan Image
+        </button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileSelected}
+        />
+
       </div>
 
-      {/* Controls - Modern Action Buttons */}
-      <div className="flex gap-3">
-        {!isScanning ? (
-          <Button
-            onClick={startScanning}
-            disabled={!cameraId}
-            className="flex-1 h-11 bg-gradient-to-r from-yellow-500 to-amber-500 dark:from-yellow-600 dark:to-amber-600 hover:from-yellow-600 hover:to-amber-600 dark:hover:from-yellow-700 dark:hover:to-amber-700 text-white font-semibold text-base rounded-xl shadow-lg shadow-yellow-500/30 dark:shadow-yellow-900/30 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:shadow-yellow-500/40 dark:hover:shadow-yellow-900/40 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Camera className="mr-2 h-5 w-5" />
-            Start Scanner
-          </Button>
-        ) : (
-          <Button
-            onClick={stopScanning}
-            disabled={isStopping}
-            variant="outline"
-            className="flex-1 h-14 border-2 border-red-500/50 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:border-red-500 font-semibold text-lg rounded-xl transition-all duration-300 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isStopping ? (
-              <>
-                <div className="mr-2 h-5 w-5 animate-spin rounded-full border-2 border-red-300 border-t-transparent" />
-                Stopping...
-              </>
-            ) : (
-              <>
-                <X className="mr-2 h-5 w-5" />
-                Stop Scanner
-              </>
-            )}
-          </Button>
+      {/* -------------------------------------------- */}
+      {/* Scanning tips */}
+      {/* -------------------------------------------- */}
+
+      {isScanning &&
+        !isProcessing && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+
+            <p className="font-semibold">
+              Scanning tips
+            </p>
+
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+
+              <li>
+                Display the student's QR
+                code at full brightness.
+              </li>
+
+              <li>
+                Keep the entire QR code
+                visible.
+              </li>
+
+              <li>
+                Hold the camera steady.
+              </li>
+
+              <li>
+                Avoid glare and reflections.
+              </li>
+
+              <li>
+                Move closer or farther
+                away until the QR fits
+                inside the frame.
+              </li>
+
+            </ul>
+
+          </div>
         )}
-      </div>
+
+      {/* -------------------------------------------- */}
+      {/* Processing indicator */}
+      {/* -------------------------------------------- */}
+
+      {isProcessing && (
+        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+
+          Processing attendance...
+
+        </div>
+      )}
+
+      {/* -------------------------------------------- */}
+      {/* Animation */}
+      {/* -------------------------------------------- */}
+
+      <style jsx>{`
+        @keyframes qr-scan-line {
+          0% {
+            transform: translate(-50%, -120px);
+          }
+
+          50% {
+            transform: translate(-50%, 120px);
+          }
+
+          100% {
+            transform: translate(-50%, -120px);
+          }
+        }
+      `}</style>
+
     </div>
   );
 }
+
+export default QRScanner;

@@ -1,34 +1,68 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+
 import { useSearchParams } from 'next/navigation';
+
 import { QRScanner } from './QRScanner';
 import { ManualInput } from './ManualInput';
-import { SessionSelector } from './SessionSelector';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+
+import {
+  Alert,
+  AlertDescription,
+} from '@/components/ui/alert';
+
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { 
-  ArrowLeft, 
-  Calendar, 
-  Clock, 
-  MapPin, 
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+
+import {
+  ArrowLeft,
+  Calendar,
+  Clock,
+  MapPin,
   Users,
   AlertCircle,
   CheckCircle2,
   Camera,
   Scan,
-  Keyboard
+  Keyboard,
 } from 'lucide-react';
+
 import { toast } from 'sonner';
+
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
+/* -------------------------------------------------------------------------- */
 
 interface Session {
   id: string;
   name: string;
   description?: string;
   eventId: string;
+
   event: {
     id: string;
     name: string;
@@ -36,864 +70,1713 @@ interface Session {
     startDate: string;
     endDate: string;
   };
+
   timeInStart: string;
   timeInEnd: string;
+
   timeOutStart?: string;
   timeOutEnd?: string;
+
   isActive: boolean;
+
   _count: {
     attendance: number;
   };
 }
 
+interface ScanResultUpdate {
+  firstName?: string;
+  lastName?: string;
+  studentIdNumber?: string;
+  scanType?: string;
+  isDuplicate?: boolean;
+  isError?: boolean;
+  errorMessage?: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Component                                                                  */
+/* -------------------------------------------------------------------------- */
+
 export function ScanPage() {
   const searchParams = useSearchParams();
-  
-  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [scanMode, setScanMode] = useState<'select' | 'scan'>('select');
-  const [inputMode, setInputMode] = useState<'qr' | 'manual'>('qr');
-  const [attendanceStats, setAttendanceStats] = useState({
-    totalScanned: 0,
-    lastScanTime: null as Date | null,
-  });
-  const [showLeaveDialog, setShowLeaveDialog] = useState(false);
-  const [isScanningActive, setIsScanningActive] = useState(false);
-  const pendingNavigationRef = useRef<string | null>(null);
 
-  // Get sessionId from URL params
-  const sessionIdFromUrl = searchParams.get('sessionId');
+  /* ------------------------------------------------------------------------ */
+  /* State                                                                    */
+  /* ------------------------------------------------------------------------ */
 
-  // Load sessions on mount
-  useEffect(() => {
-    loadSessions();
-  }, []);
+  const [selectedSession, setSelectedSession] =
+    useState<Session | null>(null);
 
-  // Auto-select session if sessionId is in URL
-  useEffect(() => {
-    if (sessionIdFromUrl && sessions.length > 0) {
-      const session = sessions.find(s => s.id === sessionIdFromUrl);
-      if (session) {
-        setSelectedSession(session);
-        setScanMode('scan');
-      }
-    }
-  }, [sessionIdFromUrl, sessions]);
+  const [sessions, setSessions] =
+    useState<Session[]>([]);
 
-  // Handle page leave warning when scanner is active
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isScanningActive) {
-        e.preventDefault();
-        e.returnValue = 'You are currently scanning QR codes. Are you sure you want to leave?';
-        return 'You are currently scanning QR codes. Are you sure you want to leave?';
-      }
-    };
+  const [loading, setLoading] =
+    useState(true);
 
-    const handlePopState = (e: PopStateEvent) => {
-      if (isScanningActive) {
-        e.preventDefault();
-        setShowLeaveDialog(true);
-        // Store the intended navigation
-        pendingNavigationRef.current = 'back';
-      }
-    };
+  const [error, setError] =
+    useState<string | null>(null);
 
-    // Add event listeners
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('popstate', handlePopState);
+  const [scanMode, setScanMode] =
+    useState<'select' | 'scan'>('select');
 
-    // Cleanup
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, [isScanningActive]);
+  const [inputMode, setInputMode] =
+    useState<'qr' | 'manual'>('qr');
 
-  // Cleanup scanner when component unmounts
-  useEffect(() => {
-    return () => {
-      if ((window as unknown as { __qrScannerCleanup?: () => void }).__qrScannerCleanup) {
-        (window as unknown as { __qrScannerCleanup: () => void }).__qrScannerCleanup();
-      }
-    };
-  }, []);
+  const [attendanceStats, setAttendanceStats] =
+    useState({
+      totalScanned: 0,
+      lastScanTime: null as Date | null,
+    });
 
-  const loadSessions = async () => {
+  const [showLeaveDialog, setShowLeaveDialog] =
+    useState(false);
+
+  const [isScanningActive, setIsScanningActive] =
+    useState(false);
+
+  const pendingNavigationRef =
+    useRef<'sessions' | 'back' | null>(null);
+
+  const sessionIdFromUrl =
+    searchParams.get('sessionId');
+
+  /* ------------------------------------------------------------------------ */
+  /* Load sessions                                                            */
+  /* ------------------------------------------------------------------------ */
+
+  const loadSessions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const response = await fetch('/api/organizer/sessions');
+
+      const response = await fetch(
+        '/api/organizer/sessions',
+        {
+          method: 'GET',
+          cache: 'no-store',
+        }
+      );
+
       if (!response.ok) {
-        throw new Error('Failed to load sessions');
+        throw new Error(
+          'Failed to load sessions.'
+        );
       }
-      
-      const data = await response.json();
-      setSessions(data.sessions || []);
+
+      const data =
+        await response.json();
+
+      setSessions(
+        Array.isArray(data.sessions)
+          ? data.sessions
+          : []
+      );
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load sessions';
-      setError(errorMessage);
-      toast.error('Error loading sessions', {
-        description: errorMessage,
-      });
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Failed to load sessions.';
+
+      console.error(
+        'Failed to load sessions:',
+        err
+      );
+
+      setError(message);
+
+      toast.error(
+        'Error loading sessions',
+        {
+          description: message,
+        }
+      );
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleSessionSelect = (session: Session) => {
-    setSelectedSession(session);
-    setScanMode('scan');
-    
-    // Update URL with sessionId
-    const url = new URL(window.location.href);
-    url.searchParams.set('sessionId', session.id);
-    window.history.replaceState({}, '', url.toString());
-  };
+  /* ------------------------------------------------------------------------ */
+  /* Initial load                                                             */
+  /* ------------------------------------------------------------------------ */
 
-  const handleBackToSessions = () => {
-    if (isScanningActive) {
-      setShowLeaveDialog(true);
-      pendingNavigationRef.current = 'sessions';
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  /* ------------------------------------------------------------------------ */
+  /* Auto-select session from URL                                             */
+  /* ------------------------------------------------------------------------ */
+
+  useEffect(() => {
+    if (
+      !sessionIdFromUrl ||
+      sessions.length === 0
+    ) {
       return;
     }
-    
-    setSelectedSession(null);
-    setScanMode('select');
-    
-    // Remove sessionId from URL
-    const url = new URL(window.location.href);
-    url.searchParams.delete('sessionId');
-    window.history.replaceState({}, '', url.toString());
-  };
 
-  const handleConfirmLeave = async () => {
-    // Clean up scanner
-    if ((window as unknown as { __qrScannerCleanup?: () => Promise<void> }).__qrScannerCleanup) {
-      await (window as unknown as { __qrScannerCleanup: () => Promise<void> }).__qrScannerCleanup();
+    const session =
+      sessions.find(
+        (item) =>
+          item.id === sessionIdFromUrl
+      );
+
+    if (!session) {
+      return;
     }
-    
-    setIsScanningActive(false);
-    setShowLeaveDialog(false);
-    
-    // Execute pending navigation
-    const navigation = pendingNavigationRef.current;
-    pendingNavigationRef.current = null;
-    
-    if (navigation === 'sessions') {
+
+    setSelectedSession(session);
+    setScanMode('scan');
+  }, [
+    sessionIdFromUrl,
+    sessions,
+  ]);
+
+  /* ------------------------------------------------------------------------ */
+  /* Scanner cleanup helper                                                   */
+  /* ------------------------------------------------------------------------ */
+
+  const cleanupScanner = useCallback(
+    async () => {
+      const globalWindow =
+        window as typeof window & {
+          __qrScannerCleanup?: () =>
+            | void
+            | Promise<void>;
+        };
+
+      if (
+        globalWindow.__qrScannerCleanup
+      ) {
+        try {
+          await globalWindow.__qrScannerCleanup();
+        } catch (err) {
+          console.warn(
+            'QR scanner cleanup warning:',
+            err
+          );
+        }
+      }
+
+      setIsScanningActive(false);
+    },
+    []
+  );
+
+  /* ------------------------------------------------------------------------ */
+  /* Before-unload protection                                                 */
+  /* ------------------------------------------------------------------------ */
+
+  useEffect(() => {
+    const handleBeforeUnload = (
+      event: BeforeUnloadEvent
+    ) => {
+      if (!isScanningActive) {
+        return;
+      }
+
+      event.preventDefault();
+
+      event.returnValue =
+        'You are currently scanning QR codes. Are you sure you want to leave?';
+    };
+
+    window.addEventListener(
+      'beforeunload',
+      handleBeforeUnload
+    );
+
+    return () => {
+      window.removeEventListener(
+        'beforeunload',
+        handleBeforeUnload
+      );
+    };
+  }, [isScanningActive]);
+
+  /* ------------------------------------------------------------------------ */
+  /* Cleanup on unmount                                                       */
+  /* ------------------------------------------------------------------------ */
+
+  useEffect(() => {
+    return () => {
+      const globalWindow =
+        window as typeof window & {
+          __qrScannerCleanup?: () =>
+            | void
+            | Promise<void>;
+        };
+
+      if (
+        globalWindow.__qrScannerCleanup
+      ) {
+        void globalWindow.__qrScannerCleanup();
+      }
+    };
+  }, []);
+
+  /* ------------------------------------------------------------------------ */
+  /* Session selection                                                        */
+  /* ------------------------------------------------------------------------ */
+
+  const handleSessionSelect = useCallback(
+    (session: Session) => {
+      setSelectedSession(session);
+      setScanMode('scan');
+      setInputMode('qr');
+
+      const url =
+        new URL(window.location.href);
+
+      url.searchParams.set(
+        'sessionId',
+        session.id
+      );
+
+      window.history.replaceState(
+        {},
+        '',
+        url.toString()
+      );
+    },
+    []
+  );
+
+  /* ------------------------------------------------------------------------ */
+  /* Back to sessions                                                         */
+  /* ------------------------------------------------------------------------ */
+
+  const handleBackToSessions =
+    useCallback(() => {
+      if (isScanningActive) {
+        pendingNavigationRef.current =
+          'sessions';
+
+        setShowLeaveDialog(true);
+
+        return;
+      }
+
       setSelectedSession(null);
       setScanMode('select');
-      
-      // Remove sessionId from URL
-      const url = new URL(window.location.href);
-      url.searchParams.delete('sessionId');
-      window.history.replaceState({}, '', url.toString());
-    } else if (navigation === 'back') {
-      // Go back in history
-      window.history.back();
-    }
-  };
 
-  const handleCancelLeave = () => {
-    setShowLeaveDialog(false);
-    pendingNavigationRef.current = null;
-  };
+      const url =
+        new URL(window.location.href);
 
-  const handleScannerCleanup = () => {
-    setIsScanningActive(false);
-  };
+      url.searchParams.delete(
+        'sessionId'
+      );
 
-  const handleScanningStateChange = (isScanning: boolean) => {
-    setIsScanningActive(isScanning);
-  };
+      window.history.replaceState(
+        {},
+        '',
+        url.toString()
+      );
+    }, [isScanningActive]);
 
-  // Cleanup scanner when switching input modes
-  useEffect(() => {
-    // When switching away from QR mode, ensure scanner is cleaned up
-    if (inputMode !== 'qr' && (window as unknown as { __qrScannerCleanup?: () => Promise<void> }).__qrScannerCleanup) {
-      (window as unknown as { __qrScannerCleanup: () => Promise<void> }).__qrScannerCleanup();
-    }
-  }, [inputMode]);
+  /* ------------------------------------------------------------------------ */
+  /* Confirm leave                                                            */
+  /* ------------------------------------------------------------------------ */
 
-  const handleAttendanceRecorded = () => {
-    setAttendanceStats(prev => ({
-      totalScanned: prev.totalScanned + 1,
-      lastScanTime: new Date(),
-    }));
-    
-    toast.success('Attendance recorded successfully!', {
-      description: `Total scanned: ${attendanceStats.totalScanned + 1}`,
-    });
-  };
+  const handleConfirmLeave =
+    useCallback(async () => {
+      await cleanupScanner();
 
-  // Error handling is done inline in the QRScanner component
-  // const handleError = (errorMessage: string) => {
-  //   setError(errorMessage);
-  //   toast.error('Scanner Error', {
-  //     description: errorMessage,
-  //   });
-  // };
+      setShowLeaveDialog(false);
+
+      const navigation =
+        pendingNavigationRef.current;
+
+      pendingNavigationRef.current = null;
+
+      if (
+        navigation === 'sessions'
+      ) {
+        setSelectedSession(null);
+        setScanMode('select');
+        setInputMode('qr');
+
+        const url =
+          new URL(window.location.href);
+
+        url.searchParams.delete(
+          'sessionId'
+        );
+
+        window.history.replaceState(
+          {},
+          '',
+          url.toString()
+        );
+
+        return;
+      }
+
+      if (
+        navigation === 'back'
+      ) {
+        window.history.back();
+      }
+    }, [cleanupScanner]);
+
+  /* ------------------------------------------------------------------------ */
+  /* Cancel leave                                                             */
+  /* ------------------------------------------------------------------------ */
+
+  const handleCancelLeave =
+    useCallback(() => {
+      setShowLeaveDialog(false);
+      pendingNavigationRef.current =
+        null;
+    }, []);
+
+  /* ------------------------------------------------------------------------ */
+  /* Scanner state                                                            */
+  /* ------------------------------------------------------------------------ */
+
+  const handleScannerCleanup =
+    useCallback(() => {
+      setIsScanningActive(false);
+    }, []);
+
+  const handleScanningStateChange =
+    useCallback(
+      (scanning: boolean) => {
+        setIsScanningActive(
+          scanning
+        );
+      },
+      []
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /* Switch input mode                                                        */
+  /* ------------------------------------------------------------------------ */
+
+  const handleInputModeChange =
+    useCallback(
+      async (
+        mode: 'qr' | 'manual'
+      ) => {
+        if (
+          mode !== 'qr' &&
+          isScanningActive
+        ) {
+          await cleanupScanner();
+        }
+
+        setInputMode(mode);
+      },
+      [
+        cleanupScanner,
+        isScanningActive,
+      ]
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /* Determine time-in / time-out                                             */
+  /* ------------------------------------------------------------------------ */
+
+  const getScanType = useCallback(
+    (session: Session) => {
+      const now = new Date();
+
+      const timeInStart =
+        new Date(
+          session.timeInStart
+        );
+
+      const timeInEnd =
+        new Date(
+          session.timeInEnd
+        );
+
+      const timeOutStart =
+        session.timeOutStart
+          ? new Date(
+              session.timeOutStart
+            )
+          : null;
+
+      const timeOutEnd =
+        session.timeOutEnd
+          ? new Date(
+              session.timeOutEnd
+            )
+          : null;
+
+      /*
+       * Time-out has priority if the current
+       * time is inside the time-out window.
+       */
+      if (
+        timeOutStart &&
+        timeOutEnd &&
+        now >= timeOutStart &&
+        now <= timeOutEnd
+      ) {
+        return 'time_out';
+      }
+
+      /*
+       * Otherwise use the time-in window.
+       */
+      if (
+        now >= timeInStart &&
+        now <= timeInEnd
+      ) {
+        return 'time_in';
+      }
+
+      /*
+       * Preserve the existing application
+       * behavior: default to time-in outside
+       * the configured windows.
+       */
+      return 'time_in';
+    },
+    []
+  );
+
+  /* ------------------------------------------------------------------------ */
+  /* Extract student ID from QR data                                         */
+  /* ------------------------------------------------------------------------ */
+
+  const extractStudentId =
+    useCallback(
+      (qrData: string): string => {
+        const value =
+          qrData.trim();
+
+        if (!value) {
+          throw new Error(
+            'The QR code is empty.'
+          );
+        }
+
+        /*
+         * First try JSON.
+         *
+         * Supports:
+         *
+         * {
+         *   "studentId": "2024-00123"
+         * }
+         *
+         * and:
+         *
+         * {
+         *   "studentIdNumber": "2024-00123"
+         * }
+         */
+        try {
+          const parsed =
+            JSON.parse(value);
+
+          if (
+            parsed &&
+            typeof parsed ===
+              'object' &&
+            !Array.isArray(parsed)
+          ) {
+            const object =
+              parsed as Record<
+                string,
+                unknown
+              >;
+
+            const possibleId =
+              object.studentId ??
+              object.studentIdNumber;
+
+            if (
+              typeof possibleId ===
+                'string' &&
+              possibleId.trim()
+            ) {
+              return possibleId.trim();
+            }
+
+            if (
+              typeof possibleId ===
+                'number'
+            ) {
+              return String(
+                possibleId
+              ).trim();
+            }
+          }
+        } catch {
+          /*
+           * Not JSON.
+           *
+           * This is completely normal for the
+           * new QR format because the QR contains
+           * only the student ID.
+           */
+        }
+
+        /*
+         * Plain-text QR.
+         */
+        return value;
+      },
+      []
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /* Record attendance                                                        */
+  /* ------------------------------------------------------------------------ */
+
+  const recordAttendance =
+    useCallback(
+      async (
+        studentId: string,
+        updateScanResult: (
+          data: ScanResultUpdate
+        ) => void,
+        source:
+          | 'qr'
+          | 'manual'
+      ) => {
+        if (!selectedSession) {
+          throw new Error(
+            'No attendance session is selected.'
+          );
+        }
+
+        const normalizedStudentId =
+          studentId.trim();
+
+        if (!normalizedStudentId) {
+          throw new Error(
+            'Please provide a student ID.'
+          );
+        }
+
+        console.log(
+          `🔍 Processing ${source} attendance:`,
+          normalizedStudentId
+        );
+
+        /* ------------------------------------------------------------------ */
+        /* Determine scan type                                                 */
+        /* ------------------------------------------------------------------ */
+
+        const scanType =
+          getScanType(
+            selectedSession
+          );
+
+        console.log(
+          '🕐 Scan type:',
+          scanType
+        );
+
+        const toastId =
+          source === 'qr'
+            ? 'scan-processing'
+            : 'manual-scan-processing';
+
+        toast.loading(
+          'Processing scan...',
+          {
+            id: toastId,
+            duration: Infinity,
+            description:
+              `Recording ${
+                scanType ===
+                'time_in'
+                  ? 'Time-In'
+                  : 'Time-Out'
+              } for ${normalizedStudentId}`,
+          }
+        );
+
+        try {
+          /* --------------------------------------------------------------- */
+          /* API request                                                      */
+          /* --------------------------------------------------------------- */
+
+          const response =
+            await fetch(
+              '/api/organizer/attendance',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type':
+                    'application/json',
+                },
+                body: JSON.stringify({
+                  sessionId:
+                    selectedSession.id,
+
+                  eventId:
+                    selectedSession.eventId,
+
+                  studentId:
+                    normalizedStudentId,
+
+                  scanType,
+                }),
+              }
+            );
+
+          console.log(
+            '📥 Attendance response:',
+            response.status,
+            response.statusText
+          );
+
+          /* --------------------------------------------------------------- */
+          /* Parse response safely                                            */
+          /* --------------------------------------------------------------- */
+
+          let responseData:
+            | Record<string, any>
+            | null = null;
+
+          try {
+            responseData =
+              await response.json();
+          } catch {
+            responseData = null;
+          }
+
+          /* --------------------------------------------------------------- */
+          /* Duplicate                                                        */
+          /* --------------------------------------------------------------- */
+
+          if (
+            response.status === 409
+          ) {
+            toast.dismiss(
+              toastId
+            );
+
+            const studentInfo =
+              responseData?.student ??
+              {};
+
+            updateScanResult({
+              firstName:
+                studentInfo.firstName ??
+                'Student',
+
+              lastName:
+                studentInfo.lastName ??
+                normalizedStudentId,
+
+              studentIdNumber:
+                studentInfo.studentIdNumber ??
+                normalizedStudentId,
+
+              scanType,
+
+              isDuplicate: true,
+
+              isError: false,
+            });
+
+            toast.warning(
+              'Already Recorded',
+              {
+                description:
+                  responseData?.message ??
+                  'This student has already been recorded for this session.',
+
+                duration: 4000,
+              }
+            );
+
+            console.log(
+              '⚠️ Duplicate attendance handled.'
+            );
+
+            /*
+             * IMPORTANT:
+             *
+             * Do NOT throw here.
+             *
+             * A duplicate is an expected attendance
+             * result, not a scanner failure.
+             */
+            return;
+          }
+
+          /* --------------------------------------------------------------- */
+          /* Other API errors                                                 */
+          /* --------------------------------------------------------------- */
+
+          if (!response.ok) {
+            toast.dismiss(
+              toastId
+            );
+
+            const message =
+              responseData?.message ??
+              responseData?.error ??
+              'Failed to record attendance.';
+
+            throw new Error(
+              message
+            );
+          }
+
+          /* --------------------------------------------------------------- */
+          /* Successful attendance                                            */
+          /* --------------------------------------------------------------- */
+
+          toast.dismiss(
+            toastId
+          );
+
+          const result =
+            responseData ?? {};
+
+          console.log(
+            '✅ Attendance recorded:',
+            result
+          );
+
+          const student =
+            result.student;
+
+          updateScanResult({
+            firstName:
+              student?.firstName ??
+              'Student',
+
+            lastName:
+              student?.lastName ??
+              '',
+
+            studentIdNumber:
+              student?.studentIdNumber ??
+              normalizedStudentId,
+
+            scanType,
+
+            isDuplicate: false,
+
+            isError: false,
+
+            errorMessage:
+              undefined,
+          });
+
+          /* --------------------------------------------------------------- */
+          /* Update stats                                                     */
+          /* --------------------------------------------------------------- */
+
+          setAttendanceStats(
+            (previous) => ({
+              totalScanned:
+                previous.totalScanned +
+                1,
+
+              lastScanTime:
+                new Date(),
+            })
+          );
+
+          /* --------------------------------------------------------------- */
+          /* Success toast                                                    */
+          /* --------------------------------------------------------------- */
+
+          const scanTypeText =
+            scanType ===
+            'time_in'
+              ? 'Time-In'
+              : 'Time-Out';
+
+          const studentName =
+            student?.firstName &&
+            student?.lastName
+              ? `${student.firstName} ${student.lastName}`
+              : normalizedStudentId;
+
+          toast.success(
+            `Successfully ${scanTypeText}!`,
+            {
+              description:
+                `${studentName} - ${
+                  student?.studentIdNumber ??
+                  normalizedStudentId
+                }`,
+
+              duration: 4000,
+            }
+          );
+        } catch (error) {
+          toast.dismiss(
+            toastId
+          );
+
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Failed to record attendance.';
+
+          console.error(
+            `❌ ${source} attendance error:`,
+            error
+          );
+
+          toast.error(
+            'Recording Failed',
+            {
+              description:
+                message,
+            }
+          );
+
+          throw error;
+        }
+      },
+      [
+        getScanType,
+        selectedSession,
+      ]
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /* QR scan handler                                                          */
+  /* ------------------------------------------------------------------------ */
+
+  const handleQRScan =
+    useCallback(
+      async (
+        qrData: string,
+        updateScanResult: (
+          data: ScanResultUpdate
+        ) => void
+      ) => {
+        console.log(
+          '📷 Raw QR decoded text:',
+          qrData
+        );
+
+        /*
+         * QRScanner has already successfully
+         * decoded the QR.
+         *
+         * We now extract the student ID.
+         */
+        let studentId: string;
+
+        try {
+          studentId =
+            extractStudentId(
+              qrData
+            );
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Invalid QR code.';
+
+          updateScanResult({
+            isError: true,
+            isDuplicate: false,
+            errorMessage:
+              message,
+          });
+
+          toast.error(
+            'Invalid QR Code',
+            {
+              description:
+                message,
+            }
+          );
+
+          throw error;
+        }
+
+        console.log(
+          '🎓 Student ID extracted:',
+          studentId
+        );
+
+        await recordAttendance(
+          studentId,
+          updateScanResult,
+          'qr'
+        );
+      },
+      [
+        extractStudentId,
+        recordAttendance,
+      ]
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /* Manual input handler                                                     */
+  /* ------------------------------------------------------------------------ */
+
+  const handleManualScan =
+    useCallback(
+      async (
+        studentIdNumber: string,
+        updateScanResult: (
+          data: ScanResultUpdate
+        ) => void
+      ) => {
+        const studentId =
+          studentIdNumber.trim();
+
+        if (!studentId) {
+          const error =
+            new Error(
+              'Please enter a student ID number.'
+            );
+
+          toast.error(
+            'Invalid Input',
+            {
+              description:
+                error.message,
+            }
+          );
+
+          throw error;
+        }
+
+        await recordAttendance(
+          studentId,
+          updateScanResult,
+          'manual'
+        );
+      },
+      [recordAttendance]
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /* Loading state                                                            */
+  /* ------------------------------------------------------------------------ */
 
   if (loading) {
     return (
-      <Card className="w-full max-w-5xl mx-auto bg-card/50 backdrop-blur-xl border-border">
-        <CardHeader className="text-center">
-          <CardTitle className="text-foreground">Loading Sessions...</CardTitle>
-          <CardDescription className="text-muted-foreground">Please wait while we load your available sessions.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="animate-pulse space-y-4">
-            <div className="h-4 bg-muted rounded"></div>
-            <div className="h-10 bg-muted rounded"></div>
-            <div className="h-10 bg-muted rounded"></div>
-            <div className="h-10 bg-muted rounded"></div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex min-h-[400px] items-center justify-center p-6">
+        <Card className="w-full max-w-md">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-8 text-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
+
+            <div>
+              <h2 className="text-lg font-semibold">
+                Loading Sessions...
+              </h2>
+
+              <p className="mt-1 text-sm text-muted-foreground">
+                Please wait while we load your
+                available sessions.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Error state                                                              */
+  /* ------------------------------------------------------------------------ */
 
   if (error) {
     return (
-      <Card className="w-full max-w-5xl mx-auto bg-card/50 backdrop-blur-xl border-border">
-        <CardHeader>
-          <CardTitle className="text-red-600 dark:text-red-400">Error Loading Sessions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Alert className="border-red-500/50 bg-red-500/10 dark:border-red-900/50 dark:bg-red-900/20">
-            <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-            <AlertDescription className="text-red-600 dark:text-red-300">
-              {error}
-            </AlertDescription>
-          </Alert>
-          <div className="mt-4">
-            <Button onClick={loadSessions} variant="outline" className="border-border text-foreground hover:bg-muted">
+      <div className="flex min-h-[400px] items-center justify-center p-6">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="h-5 w-5" />
+              Error Loading Sessions
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+
+              <AlertDescription>
+                {error}
+              </AlertDescription>
+            </Alert>
+
+            <Button
+              type="button"
+              onClick={() => {
+                void loadSessions();
+              }}
+              className="w-full"
+            >
               Try Again
             </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
-  if (scanMode === 'scan' && selectedSession) {
+  /* ------------------------------------------------------------------------ */
+  /* Scan mode                                                                */
+  /* ------------------------------------------------------------------------ */
+
+  if (
+    scanMode === 'scan' &&
+    selectedSession
+  ) {
     return (
       <>
-        <div className="space-y-4 sm:space-y-6">
-        {/* Floating Stats Counter */}
-        <div className="fixed top-4 right-4 z-50 hidden sm:block">
-          <div className="bg-gradient-to-br from-yellow-500 to-amber-500 dark:from-yellow-600 dark:to-amber-600 backdrop-blur-xl border border-white/20 rounded-xl p-2 sm:p-3 shadow-lg shadow-yellow-500/30 dark:shadow-yellow-900/30">
-            <div className="text-center">
-              <div className="text-lg sm:text-2xl font-bold text-white mb-0.5">
-                {attendanceStats.totalScanned}
+        <div className="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6">
+
+          {/* ---------------------------------------------------------------- */}
+          {/* Desktop Stats                                                    */}
+          {/* ---------------------------------------------------------------- */}
+
+          <div className="hidden sm:flex justify-end">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2 shadow-sm">
+              <div className="rounded-lg bg-yellow-500/10 p-2">
+                <Users className="h-5 w-5 text-yellow-600" />
               </div>
-              <div className="text-[8px] sm:text-[10px] text-white/90 uppercase tracking-wider">
-                <span className="hidden sm:inline">Scanned Today</span>
-                <span className="sm:hidden">Today</span>
+
+              <div>
+                <div className="text-xl font-bold">
+                  {
+                    attendanceStats.totalScanned
+                  }
+                </div>
+
+                <div className="text-xs text-muted-foreground">
+                  Scanned Today
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Mobile counter - bottom right */}
-        <div className="fixed bottom-4 right-4 z-50 sm:hidden">
-          <div className="bg-gradient-to-br from-yellow-500 to-amber-500 dark:from-yellow-600 dark:to-amber-600 backdrop-blur-xl border border-white/20 rounded-xl p-2 shadow-lg shadow-yellow-500/30 dark:shadow-yellow-900/30">
-            <div className="text-center">
-              <div className="text-lg font-bold text-white mb-0.5">
-                {attendanceStats.totalScanned}
-              </div>
-              <div className="text-[8px] text-white/90 uppercase tracking-wider">
-                Today
+          {/* ---------------------------------------------------------------- */}
+          {/* Mobile Stats                                                     */}
+          {/* ---------------------------------------------------------------- */}
+
+          <div className="fixed bottom-4 right-4 z-50 sm:hidden">
+            <div className="rounded-xl border border-white/20 bg-gradient-to-br from-yellow-500 to-amber-500 p-3 shadow-lg">
+              <div className="text-center">
+                <div className="text-xl font-bold text-white">
+                  {
+                    attendanceStats.totalScanned
+                  }
+                </div>
+
+                <div className="text-[9px] font-medium uppercase tracking-wider text-white/90">
+                  Today
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Compact Session Header */}
-        <Card className="w-full bg-card/50 backdrop-blur-xl border-border">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1">
-                <Button
-                  onClick={handleBackToSessions}
-                  variant="outline"
-                  size="sm"
-                  className="border-border text-foreground hover:bg-muted flex-shrink-0"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <div className="flex-1 min-w-0">
-                  <CardTitle className="text-lg sm:text-xl text-foreground truncate">{selectedSession.event.name}</CardTitle>
-                  <CardDescription className="text-sm text-muted-foreground truncate">
-                    {selectedSession.name}
-                  </CardDescription>
-                </div>
-              </div>
-              <Badge 
-                variant={selectedSession.isActive ? 'default' : 'secondary'}
-                className={selectedSession.isActive 
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30 backdrop-blur-sm' 
-                  : 'bg-white/10 text-white/60 border-white/20'
-                }
-              >
-                {selectedSession.isActive ? (
-                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                ) : (
-                  <Clock className="h-3 w-3 mr-1" />
-                )}
-                {selectedSession.isActive ? 'Active' : 'Inactive'}
-              </Badge>
-            </div>
-            
-            {/* Input Mode Toggle */}
-            <div className="mt-4 flex items-center justify-center">
-              <div className="flex items-center gap-3 bg-muted rounded-xl p-1">
-                <button
-                  onClick={() => setInputMode('qr')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    inputMode === 'qr'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Scan className="h-4 w-4" />
-                  QR Scan
-                </button>
-                <button
-                  onClick={() => setInputMode('manual')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    inputMode === 'manual'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Keyboard className="h-4 w-4" />
-                  Manual
-                </button>
-              </div>
-            </div>
+          {/* ---------------------------------------------------------------- */}
+          {/* Session Header                                                   */}
+          {/* ---------------------------------------------------------------- */}
 
-            {/* Compact Info Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4 text-xs sm:text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Calendar className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">
-                  {new Date(selectedSession.timeInStart).toLocaleDateString('en-PH', {
-                    timeZone: 'Asia/Manila',
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Clock className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">
-                  {new Date(selectedSession.timeInStart).toLocaleTimeString('en-PH', {
-                    timeZone: 'Asia/Manila',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    hour12: true,
-                  })}
-                </span>
-              </div>
-              {selectedSession.event.location && (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <MapPin className="h-4 w-4 flex-shrink-0" />
-                  <span className="truncate">{selectedSession.event.location}</span>
-                </div>
-              )}
-            </div>
-            
-            {/* Mobile Stats */}
-            <div className="mt-3 p-2 bg-muted border border-border rounded-lg sm:hidden">
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-foreground font-medium">Scanned</span>
-                </div>
-                <span className="text-foreground font-semibold">{attendanceStats.totalScanned}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          <Card className="w-full border-border bg-card/50 backdrop-blur-xl">
+            <CardContent className="p-4 sm:p-6">
 
-        {/* Unified Scanner Interface */}
-        <Card className="w-full bg-card border-border shadow-lg">
-          <CardContent className="p-4 sm:p-6">
-            {inputMode === 'qr' ? (
-              <QRScanner
-                sessionId={selectedSession.id}
-                eventId={selectedSession.eventId}
-                onCleanup={handleScannerCleanup}
-                onScanningStateChange={handleScanningStateChange}
-                onScan={async (qrData, updateScanResult) => {
-                  console.log('🔍 Processing scanned QR data:', qrData);
-                  
-                  try {
-                    console.log('📍 Step 1: Parsing QR data...');
-                    let studentId: string;
-                    let studentData: Record<string, unknown> = {};
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
-                    // Parse the QR data - handle both JSON and plain text
-                    try {
-                      const parsed = JSON.parse(qrData);
-                      // Check if it's actually a JSON object with studentId property
-                      if (typeof parsed === 'object' && parsed !== null && parsed.studentId) {
-                        studentId = parsed.studentId;
-                        studentData = parsed;
-                        console.log('✅ Parsed as JSON object:', studentData);
-                      } else {
-                        // Parsed successfully but it's not a student object (e.g., just a number)
-                        console.log('📝 Parsed value is not a student object, treating QR as plain student ID');
-                        studentId = qrData.trim();
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+
+                  <Button
+                    type="button"
+                    onClick={
+                      handleBackToSessions
+                    }
+                    variant="outline"
+                    size="sm"
+                    className="flex-shrink-0"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+
+                  <div className="min-w-0 flex-1">
+                    <CardTitle className="truncate text-lg sm:text-xl">
+                      {
+                        selectedSession
+                          .event
+                          .name
                       }
-                    } catch {
-                      // Plain text QR code (just the student ID)
-                      console.log('📝 JSON parse failed, treating as plain text student ID');
-                      studentId = qrData.trim();
-                    }
-                    
-                    console.log('🔍 Final studentId value:', studentId);
-                    console.log('🔍 studentId truthy check:', !!studentId);
-                    
-                    if (!studentId) {
-                      console.error('❌ No student ID found');
-                      console.error('❌ studentId value:', studentId);
-                      console.error('❌ studentId type:', typeof studentId);
-                      toast.error('Invalid QR Code', {
-                        description: 'No student ID found in QR code'
-                      });
-                      throw new Error('No student ID found in QR code');
-                    }
+                    </CardTitle>
 
-                    console.log('📍 Step 2: Student ID validated:', studentId);
+                    <CardDescription className="truncate">
+                      {
+                        selectedSession.name
+                      }
+                    </CardDescription>
+                  </div>
+                </div>
 
-                    // Determine scan type based on current time and session windows
-                    console.log('📍 Step 2.5: Determining scan type...');
-                    const currentTime = new Date();
-                    const sessionStart = new Date(selectedSession.timeInStart);
-                    const sessionEnd = new Date(selectedSession.timeInEnd);
-                    const timeOutStart = selectedSession.timeOutStart ? new Date(selectedSession.timeOutStart) : null;
-                    const timeOutEnd = selectedSession.timeOutEnd ? new Date(selectedSession.timeOutEnd) : null;
-
-                    let scanType = 'time_in'; // Default to time_in
-                    
-                    // Check if we're in the time-out window
-                    if (timeOutStart && timeOutEnd && currentTime >= timeOutStart && currentTime <= timeOutEnd) {
-                      scanType = 'time_out';
-                      console.log('🕐 Determined scan type: time_out (within timeout window)');
-                    } else if (currentTime >= sessionStart && currentTime <= sessionEnd) {
-                      scanType = 'time_in';
-                      console.log('🕐 Determined scan type: time_in (within time-in window)');
-                    } else {
-                      console.log('🕐 Determined scan type: time_in (default - outside windows)');
-                    }
-
-                    // Show processing toast
-                    toast.loading('Processing scan...', {
-                      description: `Recording ${scanType === 'time_in' ? 'Time-In' : 'Time-Out'} for ${studentId}`,
-                      duration: 0, // Don't auto-dismiss
-                      id: 'scan-processing', // Use ID to update the same toast
-                    });
-
-                    // Record attendance via API
-                    console.log('📍 Step 3: Sending attendance request...');
-                    console.log('📤 Request data:', {
-                      sessionId: selectedSession.id,
-                      eventId: selectedSession.eventId,
-                      studentId: studentId,
-                      scanType: scanType,
-                    });
-
-                    const response = await fetch('/api/organizer/attendance', {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        sessionId: selectedSession.id,
-                        eventId: selectedSession.eventId,
-                        studentId: studentId,
-                        scanType: scanType,
-                      }),
-                    });
-
-                    console.log('📍 Step 4: Fetch completed');
-                    console.log('📥 Response status:', response.status, response.statusText);
-                    console.log('📥 Request details:', {
-                      sessionId: selectedSession.id,
-                      eventId: selectedSession.eventId,
-                      studentId: studentId,
-                      scanType: 'time_in'
-                    });
-
-                    // Handle duplicate attendance (409 Conflict)
-                    if (response.status === 409) {
-                      console.log('⚠️ Duplicate scan detected');
-                      const errorData = await response.json();
-                      console.log('🔍 API Response for duplicate:', errorData);
-                      
-                      // Dismiss processing toast
-                      toast.dismiss('scan-processing');
-                      
-                      // Use student information from API response instead of QR data
-                      const studentInfo = errorData.student || {};
-                      console.log('🔍 Student info from API:', studentInfo);
-                      
-                      // Update scanner display to show the student with duplicate flag
-                      updateScanResult({
-                        firstName: studentInfo.firstName || 'Student',
-                        lastName: studentInfo.lastName || studentId,
-                        studentIdNumber: studentInfo.studentIdNumber || studentId,
-                        isDuplicate: true,
-                      });
-                      console.log('🔍 Updated scan result with:', {
-                        firstName: studentInfo.firstName || 'Student',
-                        lastName: studentInfo.lastName || studentId,
-                        studentIdNumber: studentInfo.studentIdNumber || studentId,
-                        isDuplicate: true,
-                      });
-                      
-                      // Show warning toast (orange/yellow color)
-                      toast.warning('Already Recorded', {
-                        description: errorData.message || 'This student has already been recorded for this session',
-                        duration: 4000,
-                      });
-                      
-                      // Don't throw error - this is expected behavior
-                      console.log('✅ Duplicate scan handled gracefully');
-                      return;
-                    }
-
-                    if (!response.ok) {
-                      console.log('📍 Step 5: Response not OK, parsing error...');
-                      const errorData = await response.json();
-                      console.error('❌ API Error Response:', errorData);
-                      
-                      // Dismiss processing toast
-                      toast.dismiss('scan-processing');
-                      
-                      throw new Error(errorData.message || errorData.error || 'Failed to record attendance');
-                    }
-
-                    // Dismiss processing toast
-                    toast.dismiss('scan-processing');
-
-                    console.log('📍 Step 5: Parsing success response...');
-                    const result = await response.json();
-                    console.log('📍 Step 6: Response parsed successfully');
-                    console.log('✅ Attendance recorded successfully:', result);
-                    
-                    // Update scanner display with real student data
-                    if (result.student) {
-                      updateScanResult({
-                        firstName: result.student.firstName,
-                        lastName: result.student.lastName,
-                        studentIdNumber: result.student.studentIdNumber,
-                        isDuplicate: false, // Explicitly mark as not duplicate
-                      });
-                    } else {
-                      // If no student data in response, use QR data
-                      updateScanResult({
-                        firstName: studentData.firstName as string || 'Student',
-                        lastName: studentData.lastName as string || studentId,
-                        studentIdNumber: studentData.studentIdNumber as string || studentId,
-                        isDuplicate: false,
-                      });
-                    }
-                    
-                    // Update attendance stats with data from API response
-                    handleAttendanceRecorded();
-
-                    // Show success toast with actual student name and scan type
-                    if (result.student?.firstName && result.student?.lastName) {
-                      const scanTypeText = scanType === 'time_in' ? 'Time-In' : 'Time-Out';
-                      toast.success(`✅ Successfully ${scanTypeText}!`, {
-                        description: `${result.student.firstName} ${result.student.lastName} - ${result.student.studentIdNumber}`,
-                        duration: 4000,
-                      });
-                    }
-
-                  } catch (error) {
-                    console.error('❌ Error recording attendance:', error);
-                    console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-                    const errorMsg = error instanceof Error ? error.message : 'Failed to record attendance';
-                    
-                    // Dismiss processing toast
-                    toast.dismiss('scan-processing');
-                    
-                    toast.error('Recording Failed', {
-                      description: errorMsg
-                    });
-                    throw error; // Re-throw so the scanner can handle it
+                <Badge
+                  variant={
+                    selectedSession.isActive
+                      ? 'default'
+                      : 'secondary'
                   }
-                }}
-                onError={(error) => {
-                  console.error('Scanner error:', error);
-                  toast.error('Scanner Error', { description: error });
-                }}
-              />
-            ) : (
-              <ManualInput
-                sessionId={selectedSession.id}
-                eventId={selectedSession.eventId}
-                onScan={async (studentIdNumber, updateScanResult) => {
-                  console.log('🔍 Processing manual input:', studentIdNumber);
-                  
-                  try {
-                    console.log('📍 Step 1: Validating student ID number:', studentIdNumber);
-                    
-                    if (!studentIdNumber.trim()) {
-                      console.error('❌ No student ID number provided');
-                      toast.error('Invalid Input', {
-                        description: 'Please enter a student ID number'
-                      });
-                      throw new Error('No student ID number provided');
-                    }
-
-                    console.log('📍 Step 2: Student ID number validated:', studentIdNumber);
-
-                    // Determine scan type based on current time and session windows
-                    console.log('📍 Step 2.5: Determining scan type...');
-                    const currentTime = new Date();
-                    const sessionStart = new Date(selectedSession.timeInStart);
-                    const sessionEnd = new Date(selectedSession.timeInEnd);
-                    const timeOutStart = selectedSession.timeOutStart ? new Date(selectedSession.timeOutStart) : null;
-                    const timeOutEnd = selectedSession.timeOutEnd ? new Date(selectedSession.timeOutEnd) : null;
-
-                    let scanType = 'time_in'; // Default to time_in
-                    
-                    // Check if we're in the time-out window
-                    if (timeOutStart && timeOutEnd && currentTime >= timeOutStart && currentTime <= timeOutEnd) {
-                      scanType = 'time_out';
-                      console.log('🕐 Determined scan type: time_out (within timeout window)');
-                    } else if (currentTime >= sessionStart && currentTime <= sessionEnd) {
-                      scanType = 'time_in';
-                      console.log('🕐 Determined scan type: time_in (within time-in window)');
-                    } else {
-                      console.log('🕐 Determined scan type: time_in (default - outside windows)');
-                    }
-
-                    // Show processing toast
-                    toast.loading('Processing scan...', {
-                      description: `Recording ${scanType === 'time_in' ? 'Time-In' : 'Time-Out'} for ${studentIdNumber.trim()}`,
-                      duration: 0, // Don't auto-dismiss
-                      id: 'manual-scan-processing', // Use different ID for manual input
-                    });
-
-                    // Record attendance via API
-                    console.log('📍 Step 3: Sending attendance request...');
-                    console.log('📤 Request data:', {
-                      sessionId: selectedSession.id,
-                      eventId: selectedSession.eventId,
-                      studentId: studentIdNumber.trim(),
-                      scanType: scanType,
-                    });
-
-                    const response = await fetch('/api/organizer/attendance', {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        sessionId: selectedSession.id,
-                        eventId: selectedSession.eventId,
-                        studentId: studentIdNumber.trim(),
-                        scanType: scanType,
-                      }),
-                    });
-
-                    console.log('📍 Step 4: Fetch completed');
-                    console.log('📥 Response status:', response.status, response.statusText);
-
-                    // Handle duplicate attendance (409 Conflict)
-                    if (response.status === 409) {
-                      console.log('⚠️ Duplicate manual input detected');
-                      const errorData = await response.json();
-                      console.log('🔍 API Response for duplicate:', errorData);
-                      
-                      // Dismiss processing toast
-                      toast.dismiss('manual-scan-processing');
-                      
-                      // Use student information from API response
-                      const studentInfo = errorData.student || {};
-                      console.log('🔍 Student info from API:', studentInfo);
-                      
-                      // Update display to show the student with duplicate flag
-                      updateScanResult({
-                        firstName: studentInfo.firstName || 'Student',
-                        lastName: studentInfo.lastName || studentIdNumber.trim(),
-                        studentIdNumber: studentInfo.studentIdNumber || studentIdNumber.trim(),
-                        isDuplicate: true,
-                      });
-                      
-                      // Show warning toast (orange/yellow color)
-                      toast.warning('Already Recorded', {
-                        description: errorData.message || 'This student has already been recorded for this session',
-                        duration: 4000,
-                      });
-                      
-                      // Don't throw error - this is expected behavior
-                      console.log('✅ Duplicate manual input handled gracefully');
-                      return;
-                    }
-
-                    if (!response.ok) {
-                      console.log('📍 Step 5: Response not OK, parsing error...');
-                      const errorData = await response.json();
-                      console.error('❌ API Error Response:', errorData);
-                      
-                      // Dismiss processing toast
-                      toast.dismiss('manual-scan-processing');
-                      
-                      throw new Error(errorData.message || errorData.error || 'Failed to record attendance');
-                    }
-
-                    // Dismiss processing toast
-                    toast.dismiss('manual-scan-processing');
-
-                    console.log('📍 Step 5: Parsing success response...');
-                    const result = await response.json();
-                    console.log('📍 Step 6: Response parsed successfully');
-                    console.log('✅ Attendance recorded successfully:', result);
-                    
-                    // Update display with real student data
-                    if (result.student) {
-                      updateScanResult({
-                        firstName: result.student.firstName,
-                        lastName: result.student.lastName,
-                        studentIdNumber: result.student.studentIdNumber,
-                        isDuplicate: false, // Explicitly mark as not duplicate
-                      });
-                    } else {
-                      // If no student data in response, use input data
-                      updateScanResult({
-                        firstName: 'Student',
-                        lastName: '',
-                        studentIdNumber: studentIdNumber.trim(),
-                        isDuplicate: false,
-                      });
-                    }
-                    
-                    // Update attendance stats with data from API response
-                    handleAttendanceRecorded();
-
-                    // Show success toast with actual student name and scan type
-                    if (result.student?.firstName && result.student?.lastName) {
-                      const scanTypeText = scanType === 'time_in' ? 'Time-In' : 'Time-Out';
-                      toast.success(`✅ Successfully ${scanTypeText}!`, {
-                        description: `${result.student.firstName} ${result.student.lastName} - ${result.student.studentIdNumber}`,
-                        duration: 4000,
-                      });
-                    }
-
-                  } catch (error) {
-                    console.error('❌ Error recording attendance:', error);
-                    console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-                    const errorMsg = error instanceof Error ? error.message : 'Failed to record attendance';
-                    
-                    // Dismiss processing toast
-                    toast.dismiss('manual-scan-processing');
-                    
-                    toast.error('Recording Failed', {
-                      description: errorMsg
-                    });
-                    throw error; // Re-throw so the manual input can handle it
+                  className={
+                    selectedSession.isActive
+                      ? 'border-emerald-500/30 bg-emerald-500/20 text-emerald-600'
+                      : ''
                   }
-                }}
-                onError={(error) => {
-                  console.error('Manual input error:', error);
-                  toast.error('Input Error', { description: error });
-                }}
-                onScanningStateChange={handleScanningStateChange}
-              />
-            )}
-          </CardContent>
-        </Card>
+                >
+                  {selectedSession.isActive ? (
+                    <CheckCircle2 className="mr-1 h-3 w-3" />
+                  ) : (
+                    <Clock className="mr-1 h-3 w-3" />
+                  )}
+
+                  {selectedSession.isActive
+                    ? 'Active'
+                    : 'Inactive'}
+                </Badge>
+              </div>
+
+              {/* ------------------------------------------------------------ */}
+              {/* Input Mode                                                    */}
+              {/* ------------------------------------------------------------ */}
+
+              <div className="mt-4 flex justify-center">
+                <div className="flex items-center gap-1 rounded-xl bg-muted p-1">
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleInputModeChange(
+                        'qr'
+                      );
+                    }}
+                    className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                      inputMode === 'qr'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Scan className="h-4 w-4" />
+                    QR Scan
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleInputModeChange(
+                        'manual'
+                      );
+                    }}
+                    className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                      inputMode === 'manual'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Keyboard className="h-4 w-4" />
+                    Manual
+                  </button>
+
+                </div>
+              </div>
+
+              {/* ------------------------------------------------------------ */}
+              {/* Session Information                                          */}
+              {/* ------------------------------------------------------------ */}
+
+              <div className="mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 sm:text-sm">
+
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Calendar className="h-4 w-4 flex-shrink-0" />
+
+                  <span className="truncate">
+                    {new Date(
+                      selectedSession.timeInStart
+                    ).toLocaleDateString(
+                      'en-PH',
+                      {
+                        timeZone:
+                          'Asia/Manila',
+                        month: 'short',
+                        day: 'numeric',
+                      }
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="h-4 w-4 flex-shrink-0" />
+
+                  <span className="truncate">
+                    {new Date(
+                      selectedSession.timeInStart
+                    ).toLocaleTimeString(
+                      'en-PH',
+                      {
+                        timeZone:
+                          'Asia/Manila',
+                        hour: 'numeric',
+                        minute:
+                          '2-digit',
+                        hour12: true,
+                      }
+                    )}
+                  </span>
+                </div>
+
+                {selectedSession.event
+                  .location && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <MapPin className="h-4 w-4 flex-shrink-0" />
+
+                    <span className="truncate">
+                      {
+                        selectedSession
+                          .event
+                          .location
+                      }
+                    </span>
+                  </div>
+                )}
+
+              </div>
+
+              {/* ------------------------------------------------------------ */}
+              {/* Mobile Stats                                                  */}
+              {/* ------------------------------------------------------------ */}
+
+              <div className="mt-3 rounded-lg border border-border bg-muted p-2 sm:hidden">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5 text-muted-foreground" />
+
+                    <span className="font-medium">
+                      Scanned
+                    </span>
+                  </div>
+
+                  <span className="font-semibold">
+                    {
+                      attendanceStats.totalScanned
+                    }
+                  </span>
+                </div>
+              </div>
+
+            </CardContent>
+          </Card>
+
+          {/* ---------------------------------------------------------------- */}
+          {/* Scanner / Manual Interface                                      */}
+          {/* ---------------------------------------------------------------- */}
+
+          <Card className="w-full border-border shadow-lg">
+            <CardContent className="p-4 sm:p-6">
+
+              {inputMode === 'qr' ? (
+                <QRScanner
+                  onCleanup={
+                    handleScannerCleanup
+                  }
+                  onScanningStateChange={
+                    handleScanningStateChange
+                  }
+                  onScan={
+                    handleQRScan
+                  }
+                  onError={(
+                    scannerError
+                  ) => {
+                    console.error(
+                      'Scanner error:',
+                      scannerError
+                    );
+
+                    /*
+                     * IMPORTANT:
+                     *
+                     * html5-qrcode reports
+                     * "No MultiFormat Readers..."
+                     * for normal camera frames that
+                     * don't contain a QR.
+                     *
+                     * The updated QRScanner filters
+                     * those internally, so this handler
+                     * is only for actual scanner errors.
+                     */
+                    toast.error(
+                      'Scanner Error',
+                      {
+                        description:
+                          scannerError,
+                      }
+                    );
+                  }}
+                />
+              ) : (
+                <ManualInput
+                  sessionId={
+                    selectedSession.id
+                  }
+                  eventId={
+                    selectedSession.eventId
+                  }
+                  onScan={
+                    handleManualScan
+                  }
+                  onError={(
+                    manualError
+                  ) => {
+                    console.error(
+                      'Manual input error:',
+                      manualError
+                    );
+
+                    toast.error(
+                      'Input Error',
+                      {
+                        description:
+                          manualError,
+                      }
+                    );
+                  }}
+                  onScanningStateChange={
+                    handleScanningStateChange
+                  }
+                />
+              )}
+
+            </CardContent>
+          </Card>
+
         </div>
 
-        {/* Leave Confirmation Dialog */}
-        <Dialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
+        {/* ------------------------------------------------------------------ */}
+        {/* Leave Confirmation                                                 */}
+        {/* ------------------------------------------------------------------ */}
+
+        <Dialog
+          open={showLeaveDialog}
+          onOpenChange={
+            setShowLeaveDialog
+          }
+        >
           <DialogContent className="sm:max-w-md">
+
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
                 <Camera className="h-5 w-5" />
                 Stop Scanning?
               </DialogTitle>
-              <DialogDescription className="text-gray-600 dark:text-gray-400">
-                You are currently scanning QR codes. If you leave now, the scanner will be stopped and you&apos;ll lose your current scanning session.
+
+              <DialogDescription>
+                You are currently scanning QR
+                codes. If you leave now, the
+                scanner will be stopped.
               </DialogDescription>
             </DialogHeader>
+
             <DialogFooter className="gap-2">
+
               <Button
+                type="button"
                 variant="outline"
-                onClick={handleCancelLeave}
-                className="border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
+                onClick={
+                  handleCancelLeave
+                }
               >
                 Continue Scanning
               </Button>
+
               <Button
-                onClick={handleConfirmLeave}
-                className="bg-red-500 hover:bg-red-600 text-white"
+                type="button"
+                onClick={() => {
+                  void handleConfirmLeave();
+                }}
+                className="bg-red-500 text-white hover:bg-red-600"
               >
                 Stop & Leave
               </Button>
+
             </DialogFooter>
+
           </DialogContent>
         </Dialog>
       </>
     );
   }
 
-  // Session Selection Mode
+  /* ------------------------------------------------------------------------ */
+  /* Session Selection Mode                                                   */
+  /* ------------------------------------------------------------------------ */
+
   return (
     <>
-      <div className="space-y-6">
-        <Card className="w-full bg-card/50 backdrop-blur-xl border-border">
-          <CardHeader className="text-center">
-            <CardTitle className="text-2xl sm:text-3xl text-gray-900 dark:text-gray-100">Select a Session</CardTitle>
-            <CardDescription className="text-gray-600 dark:text-gray-400">
-              Choose an active session to start scanning QR codes
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SessionSelector
-              onSessionSelect={handleSessionSelect}
-            />
-          </CardContent>
-        </Card>
+      <div className="mx-auto w-full max-w-5xl space-y-6 p-4 sm:p-6">
+
+        <div>
+          <h1 className="text-2xl font-bold sm:text-3xl">
+            Select a Session
+          </h1>
+
+          <p className="mt-1 text-muted-foreground">
+            Choose an active session to start
+            scanning QR codes.
+          </p>
+        </div>
+
+        {sessions.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center p-10 text-center">
+
+              <div className="mb-4 rounded-full bg-muted p-4">
+                <Scan className="h-8 w-8 text-muted-foreground" />
+              </div>
+
+              <h2 className="text-lg font-semibold">
+                No Sessions Available
+              </h2>
+
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                There are currently no sessions
+                available for attendance scanning.
+              </p>
+
+              <Button
+                type="button"
+                onClick={() => {
+                  void loadSessions();
+                }}
+                className="mt-5"
+              >
+                Refresh Sessions
+              </Button>
+
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
+            {sessions.map(
+              (session) => (
+                <Card
+                  key={session.id}
+                  className="transition-shadow hover:shadow-lg"
+                >
+                  <CardHeader>
+
+                    <div className="flex items-start justify-between gap-3">
+
+                      <div className="min-w-0">
+                        <CardTitle className="truncate">
+                          {
+                            session.event
+                              .name
+                          }
+                        </CardTitle>
+
+                        <CardDescription className="mt-1">
+                          {session.name}
+                        </CardDescription>
+                      </div>
+
+                      <Badge
+                        variant={
+                          session.isActive
+                            ? 'default'
+                            : 'secondary'
+                        }
+                        className={
+                          session.isActive
+                            ? 'bg-emerald-500 text-white'
+                            : ''
+                        }
+                      >
+                        {session.isActive
+                          ? 'Active'
+                          : 'Inactive'}
+                      </Badge>
+
+                    </div>
+
+                  </CardHeader>
+
+                  <CardContent className="space-y-4">
+
+                    <div className="space-y-2 text-sm text-muted-foreground">
+
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4" />
+
+                        <span>
+                          {new Date(
+                            session.timeInStart
+                          ).toLocaleDateString(
+                            'en-PH',
+                            {
+                              timeZone:
+                                'Asia/Manila',
+                              month:
+                                'short',
+                              day: 'numeric',
+                              year:
+                                'numeric',
+                            }
+                          )}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+
+                        <span>
+                          {new Date(
+                            session.timeInStart
+                          ).toLocaleTimeString(
+                            'en-PH',
+                            {
+                              timeZone:
+                                'Asia/Manila',
+                              hour:
+                                'numeric',
+                              minute:
+                                '2-digit',
+                              hour12:
+                                true,
+                            }
+                          )}
+
+                          {' – '}
+
+                          {new Date(
+                            session.timeInEnd
+                          ).toLocaleTimeString(
+                            'en-PH',
+                            {
+                              timeZone:
+                                'Asia/Manila',
+                              hour:
+                                'numeric',
+                              minute:
+                                '2-digit',
+                              hour12:
+                                true,
+                            }
+                          )}
+                        </span>
+                      </div>
+
+                      {session.event
+                        .location && (
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4" />
+
+                          <span className="truncate">
+                            {
+                              session
+                                .event
+                                .location
+                            }
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+
+                        <span>
+                          {
+                            session
+                              ._count
+                              .attendance
+                          }{' '}
+                          attendance records
+                        </span>
+                      </div>
+
+                    </div>
+
+                    <Button
+                      type="button"
+                      className="w-full"
+                      disabled={
+                        !session.isActive
+                      }
+                      onClick={() => {
+                        handleSessionSelect(
+                          session
+                        );
+                      }}
+                    >
+                      <Scan className="mr-2 h-4 w-4" />
+
+                      {session.isActive
+                        ? 'Start Scanning'
+                        : 'Session Inactive'}
+                    </Button>
+
+                  </CardContent>
+                </Card>
+              )
+            )}
+
+          </div>
+        )}
+
       </div>
 
-      {/* Leave Confirmation Dialog */}
-      <Dialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
+      {/* -------------------------------------------------------------------- */}
+      {/* Leave Dialog                                                         */}
+      {/* -------------------------------------------------------------------- */}
+
+      <Dialog
+        open={showLeaveDialog}
+        onOpenChange={
+          setShowLeaveDialog
+        }
+      >
         <DialogContent className="sm:max-w-md">
+
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
               <Camera className="h-5 w-5" />
               Stop Scanning?
             </DialogTitle>
-            <DialogDescription className="text-gray-600 dark:text-gray-400">
-              You are currently scanning QR codes. If you leave now, the scanner will be stopped and you&apos;ll lose your current scanning session.
+
+            <DialogDescription>
+              You are currently scanning QR codes.
+              If you leave now, the scanner will be
+              stopped.
             </DialogDescription>
           </DialogHeader>
+
           <DialogFooter className="gap-2">
+
             <Button
+              type="button"
               variant="outline"
-              onClick={handleCancelLeave}
-              className="border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
+              onClick={
+                handleCancelLeave
+              }
             >
               Continue Scanning
             </Button>
+
             <Button
-              onClick={handleConfirmLeave}
-              className="bg-red-500 hover:bg-red-600 text-white"
+              type="button"
+              onClick={() => {
+                void handleConfirmLeave();
+              }}
+              className="bg-red-500 text-white hover:bg-red-600"
             >
               Stop & Leave
             </Button>
+
           </DialogFooter>
+
         </DialogContent>
       </Dialog>
     </>
