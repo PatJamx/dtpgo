@@ -156,15 +156,20 @@ export async function POST(request: NextRequest) {
     )
 
   } catch (error) {
-    console.error('Error inviting organizer:', error)
-    return NextResponse.json(
-      {
-        error: 'Internal server error',
-        message: 'Failed to send organizer invitation',
-      },
-      { status: 500 }
-    )
-  }
+  console.error('========== INVITE ORGANIZER ERROR ==========')
+  console.error(error)
+
+  return NextResponse.json(
+    {
+      error: 'Internal server error',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Failed to send organizer invitation',
+    },
+    { status: 500 }
+  )
+}
 }
 
 export async function GET(request: NextRequest) {
